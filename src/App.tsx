@@ -101,58 +101,21 @@ export default function App() {
     setResult(null);
     setHallucinationAlerts([]);
 
-    const apiKey = import.meta.env.VITE_SILICONFLOW_API_KEY as string | undefined;
-    const platformLabel = PLATFORM_OPTIONS.find((o) => o.value === platform)?.label || platform;
-    if (!apiKey || apiKey.trim() === "" || apiKey.includes("请在此")) {
-      setError("未配置 API 密钥：请在项目根目录创建 .env 并设置 VITE_SILICONFLOW_API_KEY");
-      setIsGenerating(false);
-      return;
-    }
-
-    const langMap: Record<Platform, string> = {
-      "amazon-en": "英文（Amazon.com）",
-      "amazon-de": "德文（Amazon.de）",
-      "tiktok-en": "英文（TikTok Shop）",
-    };
-
     const normalizedPoints = sellingPoints.trim().replace(/[\/／]/g, "、").replace(/[,，]/g, "、");
     const originalFacts = normalizedPoints.split(/[、\n]+/).map((s) => s.trim()).filter(Boolean);
     if (productName.trim()) originalFacts.unshift(productName.trim());
 
-    const systemPrompt = `You are a senior cross-border e-commerce listing specialist for ${platformLabel}. Your task is to write a listing based on Product Facts.
-
-<Product_Facts>
-${normalizedPoints}
-</Product_Facts>
-
-Product Facts are the single source of truth. You MUST strictly base your description ONLY on the <Product_Facts>. NEVER invent, infer, or fabricate any technical specifications, numerical values, battery life, wireless versions (e.g., Bluetooth 5.0), materials, or certifications (eco-friendly/anti-bacterial etc.) that are not explicitly listed.
-
-Requirements (Amazon 2026.07.27):
-1. Output exactly 1 Title (Item Name) + 1 Item Highlights + 5 Bullet Points. Both Title and Highlights are searchable, do not duplicate keywords between them.
-   - Title (Item Name): characterCount <= 75 including spaces. Must front-load Brand + Product Type + 1-2 core keywords within first 60 chars for mobile. Use Title Case (English: "Waterproof Bluetooth Speaker for Outdoor Use"; German: noun capitalization). NOT ALL CAPS. No markdown, no emoji, no special chars ! $ ? _ { } ^ ¬ ¦ ™ ® © € £ ¥, no promotional words (best/guaranteed/on sale/free shipping/premium/high-quality), no keyword stuffing (same word <=2 times), no repeated words, no invented specs. The title you output MUST already be <=75 characters - the validator will reject any title over 75 and trigger regeneration, do not output a truncated title with substring.
-   - Item Highlights: characterCount <=125 including spaces. Provide 1 concise line for secondary attributes (material/dimensions/compatibility/use case). No markdown, no emoji, no special chars, no promotional words, no repetition. Must differ from Title.
-   - Bullets: Exactly 5. Each bullet must start with ALL CAPS keyword + colon (e.g., "IP67 WATERPROOF DESIGN:"), then FACT + BENEFIT structure. Each bullet 10-255 chars, recommended <=200 for mobile, at least 100 chars. Use sentence fragments with semicolons to separate phrases. Write numbers one to nine in full except model/measurement. Absolutely prohibited words: perfect, amazing, ultimate, reliable and other meaningless adjectives. Absolutely prohibited sentence patterns: Whether you're..., you can trust..., etc. No markdown, no emoji, no special chars ™ ® © € £ ¥, no placeholder N/A/TBD, no guarantee phrases, no external links, no ASINs, no unverified claims (eco-friendly/anti-bacterial/made from bamboo unless explicitly in Product Facts). Use cold, objective, direct pain-point language.
-2. Output language must be【${langMap[platform]}】, translate Chinese facts into idiomatic target language, never copy Chinese verbatim. For German, apply German capitalization rules.
-3. Strictly follow plain text format: "【商品标题】" then "【商品亮点】" then "【五点描述】" sections only, no extra explanations or greetings.`;
-
-    const userPrompt = `产品中文名称：${productName.trim()}
-中文核心卖点：<Product_Facts>${normalizedPoints}</Product_Facts>`;
-
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), 45000);
     try {
-      const response = await fetch("https://api.siliconflow.cn/v1/chat/completions", {
+      const response = await fetch("/api/generate", {
         method: "POST",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` },
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          model: "Qwen/Qwen2.5-72B-Instruct",
-          messages: [
-            { role: "system", content: systemPrompt },
-            { role: "user", content: userPrompt },
-          ],
-          temperature: 0.7,
-          max_tokens: 2000,
-          top_p: 0.9,
+          action: "generate",
+          productName: productName.trim(),
+          sellingPoints,
+          platform,
         }),
         signal: controller.signal,
       });
@@ -162,7 +125,8 @@ Requirements (Amazon 2026.07.27):
         throw new Error(`HTTP ${response.status}: ${errText.slice(0, 200)}`);
       }
       const data = await response.json();
-      const content: string | undefined = data?.choices?.[0]?.message?.content;
+      if (data.error) throw new Error(data.error);
+      const content: string | undefined = data.content;
       if (!content) throw new Error("返回数据为空");
       let parsed = parseListingContent(content);
       if (platform === "amazon-de") {
@@ -186,18 +150,24 @@ Requirements (Amazon 2026.07.27):
             try {
               const c2 = new AbortController();
               const t2 = setTimeout(() => c2.abort(), 30000);
-              const compressed = await (async () => {
-                const prompt = `Compress this ${platform === "tiktok-en" ? "TikTok" : "Amazon"} ${platform === "amazon-de" ? "DE" : "US"} title to <=${tLimit} characters including spaces, keep natural ${platform === "amazon-de" ? "German" : "Title Case"}, no ALL CAPS, no markdown, ${platform === "tiktok-en" ? "" : "no emoji,"} no promotional words, front-load brand within 60 chars: "${lastTitle}" Product: "${productName.trim()}" Facts: "${normalizedPoints}" Platform: ${platformLabel}. Output ONLY the title.`;
-                const r = await fetch("https://api.siliconflow.cn/v1/chat/completions", {
+const compressed = await (async () => {
+                const r = await fetch("/api/generate", {
                   method: "POST",
-                  headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` },
-                  body: JSON.stringify({ model: "Qwen/Qwen2.5-72B-Instruct", messages: [{ role: "user", content: prompt }], temperature: 0.3, max_tokens: 200 }),
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({
+                    action: "compressTitle",
+                    title: lastTitle,
+                    productName: productName.trim(),
+                    normalizedPoints,
+                    platform,
+                  }),
                   signal: c2.signal,
                 });
                 clearTimeout(t2);
                 if (!r.ok) throw new Error(`Compress HTTP ${r.status}`);
                 const d = await r.json();
-                return (d?.choices?.[0]?.message?.content?.trim().split("\n")[0] || "").replace(/^["“”]+|["“”]+$/g, "").trim();
+                if (d.error) throw new Error(d.error);
+                return (d.content || "").trim();
               })();
               const compCleaned = cleanTitleDeterministic(compressed);
               const compV = validateTitleForPlatform(compCleaned, platform);
@@ -233,18 +203,23 @@ Requirements (Amazon 2026.07.27):
             try {
               const c3 = new AbortController();
               const t3 = setTimeout(() => c3.abort(), 30000);
-              const compressedH = await (async () => {
-                const prompt = `Compress this Amazon Item Highlights to <=125 characters including spaces, keep concise, no promotional words, no repetition with title "${parsed.title}": "${lastH}" Facts: "${normalizedPoints}". Output ONLY the highlights line.`;
-                const r = await fetch("https://api.siliconflow.cn/v1/chat/completions", {
+const compressedH = await (async () => {
+                const r = await fetch("/api/generate", {
                   method: "POST",
-                  headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` },
-                  body: JSON.stringify({ model: "Qwen/Qwen2.5-72B-Instruct", messages: [{ role: "user", content: prompt }], temperature: 0.3, max_tokens: 200 }),
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({
+                    action: "compressHighlights",
+                    highlights: lastH,
+                    title: parsed.title,
+                    normalizedPoints,
+                  }),
                   signal: c3.signal,
                 });
                 clearTimeout(t3);
                 if (!r.ok) throw new Error(`Compress Highlights HTTP ${r.status}`);
                 const d = await r.json();
-                return (d?.choices?.[0]?.message?.content?.trim().split("\n")[0] || "").replace(/^["“”]+|["“”]+$/g, "").trim();
+                if (d.error) throw new Error(d.error);
+                return (d.content || "").trim();
               })();
               const compCleanedH = cleanHighlightsDeterministic(compressedH);
               const compHV = validateHighlights(compCleanedH);
@@ -314,7 +289,7 @@ Requirements (Amazon 2026.07.27):
               <div><label className="mb-2 block text-sm font-medium text-slate-700">中文核心卖点 <span className="text-red-500">*</span></label><textarea value={sellingPoints} onChange={(e) => setSellingPoints(e.target.value)} placeholder="例如：防水、长续航、便携、360°环绕音..." rows={4} className="w-full resize-none rounded-xl border border-slate-200 bg-white px-3.5 py-2.5 text-sm text-slate-900 placeholder:text-slate-400 focus:border-violet-400 focus:outline-none focus:ring-4 focus:ring-violet-100" /><p className="mt-2 text-xs text-slate-400">用逗号或换行分隔多个卖点</p></div>
               <div><label className="mb-2 block text-sm font-medium text-slate-700">目标平台与语种</label><div className="relative"><select value={platform} onChange={(e) => setPlatform(e.target.value as Platform)} className="w-full appearance-none rounded-xl border border-slate-200 bg-white px-3.5 py-2.5 pr-10 text-sm text-slate-900 focus:border-violet-400 focus:outline-none focus:ring-4 focus:ring-violet-100">{PLATFORM_OPTIONS.map((opt) => (<option key={opt.value} value={opt.value}>{opt.label}</option>))}</select><span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-slate-400"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M6 9l6 6 6-6" /></svg></span></div><p className="mt-2 text-xs text-slate-400">{PLATFORM_OPTIONS.find((o) => o.value === platform)?.hint}</p></div>
               <button onClick={handleGenerate} disabled={!canGenerate || isGenerating} className="flex w-full items-center justify-center gap-2 rounded-xl bg-violet-600 px-4 py-3 text-sm font-semibold text-white shadow-sm transition hover:bg-violet-700 disabled:cursor-not-allowed disabled:bg-slate-300">{isGenerating ? (<><span className="h-4 w-4 animate-spin rounded-full border-2 border-white/30 border-t-white" />生成中...</>) : (<><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M12 2l2.4 7.2H22l-6.2 4.5 2.4 7.3L12 16.5 5.8 21l2.4-7.3L2 9.2h7.6z" /></svg>一键生成本土化Listing</>)}</button>
-              <p className="text-center text-xs text-slate-400">已接入硅基流动 Qwen2.5-72B，需配置 .env</p>
+              <p className="text-center text-xs text-slate-400">已接入硅基流动 Qwen2.5-72B，密钥由 Vercel 安全托管</p>
             </div>
           </section>
           <section className="rounded-2xl border border-slate-200 bg-white shadow-sm">
@@ -324,7 +299,7 @@ Requirements (Amazon 2026.07.27):
             </div>
           </section>
         </div>
-        <p className="mt-6 text-center text-xs text-slate-400">已接入硅基流动 · Qwen2.5-72B · 75字符标题 + 125字符亮点 均可被搜索 · 密钥 VITE_SILICONFLOW_API_KEY</p>
+        <p className="mt-6 text-center text-xs text-slate-400">已接入硅基流动 · Qwen2.5-72B · 75字符标题 + 125字符亮点 均可被搜索 · 密钥由 Vercel Serverless 安全托管</p>
       </main>
     </div>
   );
