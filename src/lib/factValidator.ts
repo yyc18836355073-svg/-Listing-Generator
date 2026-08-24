@@ -3,7 +3,7 @@
  * 纯正则提取 + 白名单 + 与原始事实比对
  */
 
-export type FactViolationType = "UNSUPPORTED_VERSION" | "UNSUPPORTED_NUMBER";
+export type FactViolationType = "UNSUPPORTED_VERSION" | "UNSUPPORTED_NUMBER" | "UNSUPPORTED_CLAIM";
 export type FactViolation = { type: FactViolationType; value: string };
 
 const WHITELIST_EXACT = new Set(["100%", "360", "360°", "24/7", "365", "360-degree", "360° sound"]);
@@ -64,13 +64,11 @@ export function validateFacts(generatedListing: string, originalFacts: string[])
   const candidates: string[] = [];
 
   let n: RegExpExecArray | null;
-  const preciseRegex = /\b\d+(?:\.\d+)?\s*(?:W|mAh|hours?|hour|hrs?|meters?|metres?|m)\b|\b\d+\s*-\s*hour\b/gi;
+  const preciseRegex = /\b\d+(?:\.\d+)?\s*(?:W|mAh|Wh|GB|TB|MB|mAh|dB|Hz|GHz|V|A|mm|cm|inch|in|kg|g|lbs?|hours?|hour|hrs?|days?|meters?|metres?|m)\b|\b\d+\s*-\s*hour\b/gi;
 
   // 使用 preciseRegex 为主
   while ((n = preciseRegex.exec(text)) !== null) {
     const raw = n[0].trim().replace(/\s+/g, " ");
-    // 扩展：向右多取一个词以捕获 "10 meters" vs "10m"
-    // precise 已含单位，无需扩展
     candidates.push(raw);
   }
 
@@ -80,11 +78,22 @@ export function validateFacts(generatedListing: string, originalFacts: string[])
     if (numberSeen.has(key)) continue;
     numberSeen.add(key);
     if (isWhitelisted(raw)) continue;
-    // 若原始事实中已包含该数值（如 IP67 中的 67 不应被当成数值幻觉，但 IP67 不会被 numberRegex 匹配到，因为后无单位）
-    // 对于 24 hours，若 originalFacts 包含 "24" 或 "24 hours" 则放行
     if (isInOriginalFacts(raw, originalFacts)) continue;
-    // 白名单中 360 已在 isWhitelisted 处理
     violations.push({ type: "UNSUPPORTED_NUMBER", value: raw });
+  }
+
+  // 规则3：未验证声明 - eco/anti-bamboo/soy 等需包装证明
+  const claimRegex = /\b(?:eco-friendly|environmentally friendly|ecologically friendly|anti-microbial|anti-bacterial|antibacterial|anti bacterial|made from bamboo|contains bamboo|made from soy|contains soy|best on the market|top rated|best seller)\b/gi;
+  let c: RegExpExecArray | null;
+  const claimSeen = new Set<string>();
+  while ((c = claimRegex.exec(text)) !== null) {
+    const raw = c[0].trim();
+    const key = raw.toLowerCase();
+    if (claimSeen.has(key)) continue;
+    claimSeen.add(key);
+    if (isInOriginalFacts(raw, originalFacts)) continue;
+    // 即使 originalFacts 含中文“环保”，英文声明仍需英文原文才放行，避免中文泛化
+    violations.push({ type: "UNSUPPORTED_CLAIM", value: raw });
   }
 
   return violations;
