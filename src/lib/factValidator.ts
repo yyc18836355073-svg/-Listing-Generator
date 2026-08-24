@@ -23,17 +23,35 @@ function isWhitelisted(raw: string): boolean {
   return false;
 }
 
+function extractNumericKey(s: string): string | null {
+  const m = s.match(/\d+(?:\.\d+)?/);
+  return m ? m[0] : null;
+}
+
+function isNumericMatch(extracted: string, facts: string[]): boolean {
+  const num = extractNumericKey(extracted);
+  if (!num) return false;
+  for (const fact of facts) {
+    if (fact.includes(num)) return true;
+    // 中英单位归一：小时/hours  天/days
+    const factLower = fact.toLowerCase();
+    if (factLower.includes(num) && /小时|天|毫安|瓦/.test(fact)) {
+      // 若 fact 含中文单位且数值匹配，视为匹配
+      return true;
+    }
+  }
+  return false;
+}
+
 function isInOriginalFacts(extracted: string, originalFacts: string[]): boolean {
   const needle = extracted.toLowerCase().trim();
-  // 提取核心数字/版本部分用于比对：如 Bluetooth 5.0 -> 5.0, 24 hours -> 24
-  // 直接检查 extracted 是否被任一 fact 包含（大小写不敏感）
   for (const fact of originalFacts) {
     const f = fact.toLowerCase();
     if (f.includes(needle)) return true;
-    // 反向：fact 的核心数字是否在 extracted 中？如 fact "蓝牙" 不含 "5.0"，则不算包含
-    // 对于中文 fact，直接字符串包含判断即可
     if (needle.includes(f) && f.length > 1) return true;
   }
+  // 数值归一兜底：11 Hours vs 11小时
+  if (isNumericMatch(extracted, originalFacts)) return true;
   return false;
 }
 

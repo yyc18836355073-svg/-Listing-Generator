@@ -259,6 +259,46 @@ export function getTitleDisplay(title: string) {
   return { text: `${result.length} / 75`, status: "warning" as const, message: "⚠ 建议优化" };
 }
 
+export function getTitleLimitForPlatform(platform: string): number {
+  if (platform === "tiktok-en") return 80;
+  return 75;
+}
+
+export function validateTitleForPlatform(title: string, platform: string): TitleValidationResult {
+  if (platform === "tiktok-en") {
+    // TikTok: 80字符，允许emoji，促销词仅警告
+    const base = validateTitle(title);
+    const limit = 80;
+    const length = [...title.trim()].length;
+    // 重算 OVER_LENGTH 按80
+    const filtered = base.violations.filter(v => v.type !== "OVER_LENGTH");
+    if (length > limit) {
+      filtered.push({ type: "OVER_LENGTH", message: `超出标题长度限制（${length} / ${limit}）`, detail: `${length - limit} chars over` });
+    }
+    // TikTok 允许 emoji，移除 EMOJI 违规
+    const withoutEmoji = filtered.filter(v => v.type !== "EMOJI");
+    // 促销词在 TikTok 仅警告，不阻断：移除 PROMOTIONAL 的阻断，改为保留但 valid 仍 true 若仅有促销词
+    const hasOnlyPromo = withoutEmoji.length === 1 && withoutEmoji[0].type === "PROMOTIONAL";
+    const valid = hasOnlyPromo ? true : withoutEmoji.length === 0;
+    // 若仅有促销词，仍返回 warning 长度
+    return { valid, length, violations: withoutEmoji };
+  }
+  return validateTitle(title);
+}
+
+export function getTitleDisplayForPlatform(title: string, platform: string) {
+  const limit = getTitleLimitForPlatform(platform);
+  const result = platform === "tiktok-en" ? validateTitleForPlatform(title, platform) : validateTitle(title);
+  if (result.valid) {
+    return { text: `${result.length} / ${limit}`, status: "ok" as const, message: platform === "tiktok-en" ? "✓ 符合 TikTok 标题要求" : "✓ 符合 Amazon 标题长度要求" };
+  }
+  const over = result.violations.find((v) => v.type === "OVER_LENGTH");
+  if (over) {
+    return { text: `${result.length} / ${limit}`, status: "over" as const, message: "✕ 超出标题长度限制" };
+  }
+  return { text: `${result.length} / ${limit}`, status: "warning" as const, message: "⚠ 建议优化" };
+}
+
 export type HighlightsValidationResult = {
   valid: boolean;
   length: number;
@@ -307,17 +347,23 @@ export function validateTitleMobile(title: string, brand?: string) {
   return { hasBrandIn60, warnings, first60Length: [...first60].length };
 }
 
-// 德文 Title Case：名词首字母大写，小词规则不适用德语，保留原有 Preserve 逻辑但不过滤小词
+// 德文 Title Case：按空格+连字符分段，每段首字母大写
 export function toTitleCaseGerman(input: string): string {
   const cleaned = input.replace(/\s+/g, " ").trim();
   const words = cleaned.split(" ");
   return words.map((raw) => {
     if (!raw) return raw;
-    const match = raw.match(/^([^A-Za-z0-9ÄÖÜäöüß]*)([A-Za-z0-9ÄÖÜäöüß°]+)([^A-Za-z0-9ÄÖÜäöüß]*)$/);
-    if (!match) return raw;
-    const [, prefix, core, suffix] = match;
-    if (isPreserveToken(core)) return prefix + normalizePreserveToken(core) + suffix;
-    const lower = core.toLowerCase();
-    return prefix + lower.charAt(0).toUpperCase() + lower.slice(1) + suffix;
+    // 处理连字符：bluetooth-lautsprecher -> Bluetooth-Lautsprecher
+    const parts = raw.split("-");
+    const mapped = parts.map((part) => {
+      if (!part) return part;
+      const match = part.match(/^([^A-Za-z0-9ÄÖÜäöüß]*)([A-Za-z0-9ÄÖÜäöüß°]+)([^A-Za-z0-9ÄÖÜäöüß]*)$/);
+      if (!match) return part;
+      const [, prefix, core, suffix] = match;
+      if (isPreserveToken(core)) return prefix + normalizePreserveToken(core) + suffix;
+      const lower = core.toLowerCase();
+      return prefix + lower.charAt(0).toUpperCase() + lower.slice(1) + suffix;
+    });
+    return mapped.join("-");
   }).join(" ");
 }
