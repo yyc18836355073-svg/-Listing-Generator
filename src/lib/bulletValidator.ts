@@ -15,7 +15,10 @@ export type BulletViolationType =
   | "GUARANTEE"
   | "EXTERNAL_LINK"
   | "REPEATED_CONTENT"
-  | "MISSING_HEADER";
+  | "MISSING_HEADER"
+  | "END_PUNCTUATION"
+  | "NUMERAL_WORD"
+  | "UNIT_SPACE";
 
 export type BulletValidationResult = {
   valid: boolean;
@@ -36,6 +39,11 @@ const GUARANTEE_PHRASES = ["money-back guarantee", "full refund", "money back", 
 
 const EXTERNAL_LINK_PATTERN = /(https?:\/\/|www\.|\.com|\.net|\.org|@\w+\.\w+|phone:|tel:)/i;
 const ASIN_PATTERN = /\bB0[A-Z0-9]{8}\b/;
+
+// 测量/技术单位：数字后跟这些单位视为"型号/测量"，不要求拼写1-9
+const MEASURE_UNITS = /^(ml|l|oz|cm|mm|km|m|in|inch|inches|ft|kg|g|lb|lbs|w|wh|mah|v|a|hz|ghz|khz|db|min|mins|hr|hrs|hour|hours|day|days|°|degrees|%|x|pack|pcs|ct|count|gb|tb|mb|watt|watts|volt|volts|amp|amps)$/i;
+// 物理单位：官方要求数字与单位间带空格（60 ml），这些连写时提示
+const SPACE_UNITS = /^(ml|oz|cm|mm|km|kg|lb|lbs|inch|inches|ft|g|in)$/i;
 
 export function validateBullet(bullet: string): BulletValidationResult {
   const violations: BulletValidationResult["violations"] = [];
@@ -104,7 +112,40 @@ export function validateBullet(bullet: string): BulletValidationResult {
     violations.push({ type: "MISSING_HEADER", message: "建议以全大写头+冒号开头（如 'IP67 WATERPROOF:'）" });
   }
 
-  return { valid: violations.filter(v => v.type !== "OVER_RECOMMENDED" && v.type !== "MISSING_HEADER").length === 0, length, violations };
+  // 句尾标点：句段式不使用句尾标点
+  if (/[.!?。]$/.test(trimmed)) {
+    violations.push({ type: "END_PUNCTUATION", message: "句段式结尾不应使用句号/叹号等标点" });
+  }
+
+  // 数字1-9拼写（型号/测量豁免）
+  const numeralRegex = /(?<![\d.\-])[1-9](?![\d.])/g;
+  let nm: RegExpExecArray | null;
+  while ((nm = numeralRegex.exec(trimmed)) !== null) {
+    const num = nm[0];
+    const idx = nm.index;
+    // 向后取紧跟的词，判断是否测量/技术单位
+    const rest = trimmed.slice(idx + 1);
+    const nextWordMatch = rest.match(/^\s*([A-Za-z%°]+)/);
+    const nextWord = nextWordMatch ? nextWordMatch[1] : "";
+    // 数字后紧跟连字符（2-in-1 / 3-in-1）视为技术词
+    const dashAfter = /^\s*-/.test(rest);
+    if (MEASURE_UNITS.test(nextWord) || dashAfter) continue;
+    violations.push({ type: "NUMERAL_WORD", message: `数字 ${num} 建议拼写为英文（非型号/测量）` });
+  }
+
+  // 数字与单位空格：物理单位应带空格（60 ml）
+  const unitSpaceRegex = /(\d+(?:\.\d+)?)(ml|oz|cm|mm|km|kg|lb|lbs|inch|inches|ft|g|in)\b/gi;
+  let us: RegExpExecArray | null;
+  while ((us = unitSpaceRegex.exec(trimmed)) !== null) {
+    const unit = us[2];
+    // 若数字与单位紧贴（无空格）则提示
+    if (SPACE_UNITS.test(unit)) {
+      violations.push({ type: "UNIT_SPACE", message: `数字与单位建议加空格（如 "${us[1]} ${unit}"）` });
+    }
+  }
+
+  const WARNING_ONLY = new Set(["OVER_RECOMMENDED", "MISSING_HEADER", "END_PUNCTUATION", "NUMERAL_WORD", "UNIT_SPACE"]);
+  return { valid: violations.filter(v => !WARNING_ONLY.has(v.type)).length === 0, length, violations };
 }
 
 export function validateBullets(bullets: string[]): {
