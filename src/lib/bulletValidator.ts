@@ -1,6 +1,10 @@
 /**
- * 跨境电商平台（重点针对 Amazon 2024/2026 规则）高危违规词与侵权词库
+ * 跨境电商平台（重点针对 Amazon 2024/2026 规则）高危违规词库与五点描述校验器
  */
+
+// ==============================
+// 1. 高危违规词与侵权词库
+// ==============================
 
 export interface BannedWordRule {
   pattern: RegExp;
@@ -45,7 +49,7 @@ export const BANNED_RULES: BannedWordRule[] = [
   // 5. 未经认证的环保与材质虚假宣称（Environmental / Material Claims）
   { pattern: /\b(eco[- ]?friendly|environmentally friendly)\b/i, word: 'eco-friendly', category: 'environmental', reason: '亚马逊 2024 新规要求环保宣称必须提供对应认证，否则会被限流' },
   { pattern: /\b(100% biodegradable|fully biodegradable)\b/i, word: '100% biodegradable', category: 'environmental', reason: '降解宣称需提供第三方合规证书' },
-  { pattern: /\b(contains bamboo)\b/i, word: 'contains bamboo', category: 'restricted', reason: '纺织类目竹纤维（Bamboo-derived）需标注 Viscose/Rayon 否则违规' },
+  { pattern: /\b(contains bamboo)\b/i, word: 'contains bamboo', category: 'restricted', reason: '纺织类目竹纤维需标注 Viscose/Rayon 否则违规' },
 ];
 
 /**
@@ -53,7 +57,6 @@ export const BANNED_RULES: BannedWordRule[] = [
  */
 export function checkBannedWords(text: string): { word: string; reason: string; category: string }[] {
   const violations: { word: string; reason: string; category: string }[] = [];
-  
   for (const rule of BANNED_RULES) {
     if (rule.pattern.test(text)) {
       violations.push({
@@ -63,6 +66,119 @@ export function checkBannedWords(text: string): { word: string; reason: string; 
       });
     }
   }
-
   return violations;
+}
+
+// ==============================
+// 2. 五点描述校验逻辑
+// ==============================
+
+export interface BulletValidationResult {
+  bulletIndex: number;
+  text: string;
+  charCount: number;
+  wordCount: number;
+  isValid: boolean;
+  warnings: string[];
+  errors: string[];
+}
+
+/**
+ * 校验单条五点描述（针对 Amazon 2024/2026 最新规范）
+ */
+export function validateSingleBullet(text: string, index: number): BulletValidationResult {
+  const warnings: string[] = [];
+  const errors: string[] = [];
+  const trimmed = text.trim();
+  const charCount = trimmed.length;
+  const wordCount = trimmed ? trimmed.split(/\s+/).length : 0;
+
+  // 1. 长度校验（推荐每条 150 ~ 250 字符，单条硬性上限 500 字符）
+  if (charCount === 0) {
+    errors.push('五点描述不能为空');
+  } else if (charCount < 50) {
+    warnings.push(`描述过短（当前 ${charCount} 字符），建议在 150~250 字符之间以获得更好转化`);
+  } else if (charCount > 500) {
+    errors.push(`字符数超限（当前 ${charCount} 字符），单条五点上限为 500 字符`);
+  } else if (charCount > 250) {
+    warnings.push(`字符数偏长（当前 ${charCount} 字符），亚马逊官方推荐 150~250 字符以内`);
+  }
+
+  // 2. 违禁词与侵权词拦截
+  const bannedViolations = checkBannedWords(trimmed);
+  for (const violation of bannedViolations) {
+    errors.push(`包含高危/违禁词【${violation.word}】：${violation.reason}`);
+  }
+
+  // 3. 特殊符号与 Emoji 拦截（亚马逊严格禁止使用表情符号）
+  const emojiRegex = /[\u{1F300}-\u{1F6FF}\u{1F900}-\u{1F9FF}\u{2600}-\u{26FF}\u{2700}-\u{27BF}]/u;
+  if (emojiRegex.test(trimmed)) {
+    errors.push('包含 Emoji 表情符号，亚马逊政策严禁在五点描述中使用表情符号');
+  }
+
+  // 4. 特殊强调符号拦截（如 ★, ✔, ✈, ➢, ● 等）
+  const specialSymbols = /[★☆✔✓✕✖✗✈➢➤►▶●◆■▲]/;
+  if (specialSymbols.test(trimmed)) {
+    warnings.push('包含特殊字符图标（如 ★、✔、● 等），建议移除以防被亚马逊搜索降权');
+  }
+
+  // 5. HTML 标签与 Markdown 拦截
+  if (/<[a-z][\s\S]*>/i.test(trimmed)) {
+    errors.push('包含 HTML 标签，亚马逊禁止在五点中使用任何 HTML 代码');
+  }
+  if (/(\*\*|__|\#\#|```)/.test(trimmed)) {
+    warnings.push('包含 Markdown 格式符号，建议使用纯文本');
+  }
+
+  // 6. 联系方式与外链检测
+  if (/(\bhttps?:\/\/|www\.|\.com\b|\.net\b|@|email|tel:|phone:)/i.test(trimmed)) {
+    errors.push('包含外部链接、邮箱或联系方式，属于严重违规行为');
+  }
+
+  // 7. ASIN 拦截
+  if (/\bB0[A-Z0-9]{8}\b/.test(trimmed)) {
+    errors.push('包含 ASIN 编号，禁止在描述中直接引用竞品或自身 ASIN');
+  }
+
+  return {
+    bulletIndex: index + 1,
+    text: trimmed,
+    charCount,
+    wordCount,
+    isValid: errors.length === 0,
+    warnings,
+    errors,
+  };
+}
+
+/**
+ * 批量校验五点描述
+ */
+export function validateAllBullets(bullets: string[]): {
+  results: BulletValidationResult[];
+  totalCharCount: number;
+  isAllValid: boolean;
+  generalWarnings: string[];
+} {
+  const results = bullets.map((b, i) => validateSingleBullet(b, i));
+  const totalCharCount = bullets.reduce((sum, b) => sum + b.trim().length, 0);
+  const generalWarnings: string[] = [];
+
+  // 五点总字数建议控制在 1000 字符以内
+  if (totalCharCount > 1000) {
+    generalWarnings.push(`五点描述总字符数（${totalCharCount} 字符）超过官方推荐的 1000 字符限制`);
+  }
+
+  if (bullets.length !== 5) {
+    generalWarnings.push(`当前五点数量为 ${bullets.length} 条，建议完整填满 5 条`);
+  }
+
+  const isAllValid = results.every((r) => r.isValid);
+
+  return {
+    results,
+    totalCharCount,
+    isAllValid,
+    generalWarnings,
+  };
 }
