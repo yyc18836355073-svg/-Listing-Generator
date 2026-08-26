@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { validateAllBullets, BulletValidationResult } from './lib/bulletValidator';
+import { validateAllBullets, type BulletValidationResult } from './lib/bulletValidator';
 
 // 计算 UTF-8 字节长度（亚马逊 Search Terms 严格以字节计算）
 function getByteLength(str: string): number {
@@ -46,18 +46,18 @@ export function App() {
   // 解析大模型返回的标签内容
   const parseAIResult = (raw: string): void => {
     const titleMatch = raw.match(/【商品标题】\s*([\s\S]*?)(?=【商品亮点】|【五点描述】|【搜索词】|$)/);
-    const parsedTitle: string = titleMatch ? titleMatch.trim() : '';
+    const parsedTitle: string = (titleMatch && titleMatch) ? titleMatch.trim() : '';
 
     const hlMatch = raw.match(/【商品亮点】\s*([\s\S]*?)(?=【五点描述】|【搜索词】|$)/);
-    const parsedHighlights: string[] = hlMatch
+    const parsedHighlights: string[] = (hlMatch && hlMatch)
       ? hlMatch
           .split('\n')
-          .map((line: string) => line.replace(/^[-*•\d.]\s*/, '').trim())
+          .map((line: string) => line.replace(/^[-*•\d]+[.)、\s]*/, '').trim())
           .filter((line: string) => Boolean(line))
       : [];
 
     const bulletMatch = raw.match(/【五点描述】\s*([\s\S]*?)(?=【搜索词】|$)/);
-    const parsedBullets: string[] = bulletMatch
+    const parsedBullets: string[] = (bulletMatch && bulletMatch)
       ? bulletMatch
           .split('\n')
           .map((line: string) => line.replace(/^\d+\.\s*/, '').trim())
@@ -65,7 +65,7 @@ export function App() {
       : [];
 
     const stMatch = raw.match(/【搜索词】\s*([\s\S]*?)$/);
-    const parsedSearchTerms: string = stMatch ? stMatch.trim().replace(/\n+/g, ' ') : '';
+    const parsedSearchTerms: string = (stMatch && stMatch) ? stMatch.trim().replace(/\n+/g, ' ') : '';
 
     setTitle(parsedTitle);
     setHighlights(parsedHighlights);
