@@ -7,18 +7,18 @@ function getByteLength(str: string): number {
 }
 
 export function App() {
-  const [productName, setProductName] = useState('');
-  const [sellingPoints, setSellingPoints] = useState('');
-  const [platform, setPlatform] = useState('amazon-us');
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState('');
+  const [productName, setProductName] = useState<string>('');
+  const [sellingPoints, setSellingPoints] = useState<string>('');
+  const [platform, setPlatform] = useState<string>('amazon-us');
+  const [loading, setLoading] = useState<boolean>(false);
+  const [error, setError] = useState<string>('');
   const [copiedSection, setCopiedSection] = useState<string | null>(null);
 
   // 解析后的 Listing 各字段状态
-  const [title, setTitle] = useState('');
+  const [title, setTitle] = useState<string>('');
   const [highlights, setHighlights] = useState<string[]>([]);
   const [bullets, setBullets] = useState<string[]>([]);
-  const [searchTerms, setSearchTerms] = useState('');
+  const [searchTerms, setSearchTerms] = useState<string>('');
   const [bulletValidation, setBulletValidation] = useState<{
     results: BulletValidationResult[];
     totalCharCount: number;
@@ -34,9 +34,9 @@ export function App() {
   };
 
   // 生成全部文案合并内容
-  const getAllContentText = () => {
+  const getAllContentText = (): string => {
     let text = `【商品标题】\n${title}\n\n【商品亮点】\n${highlights.join('\n')}\n\n【五点描述】\n`;
-    text += bullets.map((b, i) => `${i + 1}. ${b}`).join('\n');
+    text += bullets.map((b: string, i: number) => `${i + 1}. ${b}`).join('\n');
     if (searchTerms) {
       text += `\n\n【Search Terms 后台搜索词】\n${searchTerms}`;
     }
@@ -54,7 +54,7 @@ export function App() {
     const parsedHighlights = hlMatch
       ? hlMatch
           .split('\n')
-          .map((line) => line.replace(/^[-*•\d.]\s*/, '').trim())
+          .map((line: string) => line.replace(/^[-*•\d.]\s*/, '').trim())
           .filter(Boolean)
       : [];
 
@@ -63,7 +63,7 @@ export function App() {
     const parsedBullets = bulletMatch
       ? bulletMatch
           .split('\n')
-          .map((line) => line.replace(/^\d+\.\s*/, '').trim())
+          .map((line: string) => line.replace(/^\d+\.\s*/, '').trim())
           .filter(Boolean)
       : [];
 
@@ -84,7 +84,7 @@ export function App() {
   };
 
   // 提交生成请求
-  const handleGenerate = async (e: React.FormEvent) => {
+  const handleGenerate = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     if (!productName.trim() || !sellingPoints.trim()) {
       setError('请填写商品名称和核心卖点');
@@ -105,7 +105,7 @@ export function App() {
       });
 
       clearTimeout(timeoutId);
-      const data = await res.json();
+      const data = (await res.json()) as { error?: string; details?: string; result?: string };
 
       if (!res.ok) {
         throw new Error(data.error || data.details || '生成失败，请重试');
@@ -114,11 +114,15 @@ export function App() {
       if (data.result) {
         parseAIResult(data.result);
       }
-    } catch (err: any) {
-      if (err.name === 'AbortError') {
-        setError('请求超时（45秒），大模型响应较慢，请稍后重试');
+    } catch (err: unknown) {
+      if (err instanceof Error) {
+        if (err.name === 'AbortError') {
+          setError('请求超时（45秒），大模型响应较慢，请稍后重试');
+        } else {
+          setError(err.message || '网络请求异常');
+        }
       } else {
-        setError(err.message || '网络请求异常');
+        setError('未知错误，请重试');
       }
     } finally {
       setLoading(false);
@@ -152,7 +156,7 @@ export function App() {
                 <input
                   type="text"
                   value={productName}
-                  onChange={(e) => setProductName(e.target.value)}
+                  onChange={(e: React.ChangeEvent<HTMLInputElement>) => setProductName(e.target.value)}
                   placeholder="例如：Stainless Steel Insulated Water Bottle 32oz"
                   className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
                   disabled={loading}
@@ -163,7 +167,7 @@ export function App() {
                 <label className="block text-sm font-medium text-slate-700 mb-1">目标平台 / 站点</label>
                 <select
                   value={platform}
-                  onChange={(e) => setPlatform(e.target.value)}
+                  onChange={(e: React.ChangeEvent<HTMLSelectElement>) => setPlatform(e.target.value)}
                   className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm bg-white focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
                   disabled={loading}
                 >
@@ -183,7 +187,7 @@ export function App() {
               </label>
               <textarea
                 value={sellingPoints}
-                onChange={(e) => setSellingPoints(e.target.value)}
+                onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) => setSellingPoints(e.target.value)}
                 rows={4}
                 placeholder="例如：
 1. 316食品级不锈钢内胆，24小时保温/12小时保冷
@@ -227,6 +231,7 @@ export function App() {
             <div className="flex items-center justify-between bg-white p-4 rounded-xl border border-slate-200 shadow-sm">
               <span className="text-sm font-semibold text-slate-800">✅ 生成结果与合规检查</span>
               <button
+                type="button"
                 onClick={() => copyToClipboard(getAllContentText(), 'all')}
                 className="text-xs px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-md font-medium transition-colors"
               >
@@ -245,6 +250,7 @@ export function App() {
                     </span>
                   </div>
                   <button
+                    type="button"
                     onClick={() => copyToClipboard(title, 'title')}
                     className="text-xs text-blue-600 hover:text-blue-800 font-medium"
                   >
@@ -263,6 +269,7 @@ export function App() {
                 <div className="flex items-center justify-between">
                   <h3 className="font-semibold text-slate-800 text-sm">【核心亮点】</h3>
                   <button
+                    type="button"
                     onClick={() => copyToClipboard(highlights.join('\n'), 'highlights')}
                     className="text-xs text-blue-600 hover:text-blue-800 font-medium"
                   >
@@ -270,7 +277,7 @@ export function App() {
                   </button>
                 </div>
                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
-                  {highlights.map((hl, i) => (
+                  {highlights.map((hl: string, i: number) => (
                     <div key={i} className="text-xs text-slate-700 bg-blue-50 border border-blue-100 p-2.5 rounded-lg">
                       {hl}
                     </div>
@@ -292,7 +299,8 @@ export function App() {
                     )}
                   </div>
                   <button
-                    onClick={() => copyToClipboard(bullets.map((b, i) => `${i + 1}. ${b}`).join('\n'), 'bullets')}
+                    type="button"
+                    onClick={() => copyToClipboard(bullets.map((b: string, i: number) => `${i + 1}. ${b}`).join('\n'), 'bullets')}
                     className="text-xs text-blue-600 hover:text-blue-800 font-medium"
                   >
                     {copiedSection === 'bullets' ? '✓ 已复制' : '复制五点'}
@@ -300,7 +308,7 @@ export function App() {
                 </div>
 
                 <div className="space-y-3">
-                  {bullets.map((bullet, index) => {
+                  {bullets.map((bullet: string, index: number) => {
                     const val = bulletValidation?.results[index];
                     return (
                       <div key={index} className="p-3.5 bg-slate-50 rounded-lg border border-slate-200 space-y-2">
@@ -313,7 +321,7 @@ export function App() {
                         {/* 违规错误提示 */}
                         {val && val.errors.length > 0 && (
                           <div className="space-y-1">
-                            {val.errors.map((err, ei) => (
+                            {val.errors.map((err: string, ei: number) => (
                               <div key={ei} className="text-xs text-rose-700 bg-rose-50 px-2 py-1 rounded border border-rose-200">
                                 ❌ {err}
                               </div>
@@ -324,7 +332,7 @@ export function App() {
                         {/* 警告提示 */}
                         {val && val.warnings.length > 0 && (
                           <div className="space-y-1">
-                            {val.warnings.map((warn, wi) => (
+                            {val.warnings.map((warn: string, wi: number) => (
                               <div key={wi} className="text-xs text-amber-700 bg-amber-50 px-2 py-1 rounded border border-amber-200">
                                 ⚠️ {warn}
                               </div>
@@ -349,6 +357,7 @@ export function App() {
                     </span>
                   </div>
                   <button
+                    type="button"
                     onClick={() => copyToClipboard(searchTerms, 'st')}
                     className="text-xs text-blue-600 hover:text-blue-800 font-medium"
                   >
