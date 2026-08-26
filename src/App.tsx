@@ -27,7 +27,7 @@ export function App() {
   } | null>(null);
 
   // 一键复制辅助函数
-  const copyToClipboard = (text: string, sectionKey: string) => {
+  const copyToClipboard = (text: string, sectionKey: string): void => {
     navigator.clipboard.writeText(text);
     setCopiedSection(sectionKey);
     setTimeout(() => setCopiedSection(null), 2000);
@@ -35,7 +35,7 @@ export function App() {
 
   // 生成全部文案合并内容
   const getAllContentText = (): string => {
-    let text = `【商品标题】\n${title}\n\n【商品亮点】\n${highlights.join('\n')}\n\n【五点描述】\n`;
+    let text: string = `【商品标题】\n${title}\n\n【商品亮点】\n${highlights.join('\n')}\n\n【五点描述】\n`;
     text += bullets.map((b: string, i: number) => `${i + 1}. ${b}`).join('\n');
     if (searchTerms) {
       text += `\n\n【Search Terms 后台搜索词】\n${searchTerms}`;
@@ -44,39 +44,34 @@ export function App() {
   };
 
   // 解析大模型返回的标签内容
-  const parseAIResult = (raw: string) => {
-    // 提取标题
+  const parseAIResult = (raw: string): void => {
     const titleMatch = raw.match(/【商品标题】\s*([\s\S]*?)(?=【商品亮点】|【五点描述】|【搜索词】|$)/);
-    const parsedTitle = titleMatch ? titleMatch.trim() : '';
+    const parsedTitle: string = titleMatch ? titleMatch.trim() : '';
 
-    // 提取亮点
     const hlMatch = raw.match(/【商品亮点】\s*([\s\S]*?)(?=【五点描述】|【搜索词】|$)/);
-    const parsedHighlights = hlMatch
+    const parsedHighlights: string[] = hlMatch
       ? hlMatch
           .split('\n')
           .map((line: string) => line.replace(/^[-*•\d.]\s*/, '').trim())
-          .filter(Boolean)
+          .filter((line: string) => Boolean(line))
       : [];
 
-    // 提取五点
     const bulletMatch = raw.match(/【五点描述】\s*([\s\S]*?)(?=【搜索词】|$)/);
-    const parsedBullets = bulletMatch
+    const parsedBullets: string[] = bulletMatch
       ? bulletMatch
           .split('\n')
           .map((line: string) => line.replace(/^\d+\.\s*/, '').trim())
-          .filter(Boolean)
+          .filter((line: string) => Boolean(line))
       : [];
 
-    // 提取 Search Terms
     const stMatch = raw.match(/【搜索词】\s*([\s\S]*?)$/);
-    const parsedSearchTerms = stMatch ? stMatch.trim().replace(/\n+/g, ' ') : '';
+    const parsedSearchTerms: string = stMatch ? stMatch.trim().replace(/\n+/g, ' ') : '';
 
     setTitle(parsedTitle);
     setHighlights(parsedHighlights);
     setBullets(parsedBullets);
     setSearchTerms(parsedSearchTerms);
 
-    // 立即执行五点合规校验
     if (parsedBullets.length > 0) {
       const validation = validateAllBullets(parsedBullets);
       setBulletValidation(validation);
@@ -84,7 +79,7 @@ export function App() {
   };
 
   // 提交生成请求
-  const handleGenerate = async (e: React.FormEvent<HTMLFormElement>) => {
+  const handleGenerate = async (e: React.FormEvent<HTMLFormElement>): Promise<void> => {
     e.preventDefault();
     if (!productName.trim() || !sellingPoints.trim()) {
       setError('请填写商品名称和核心卖点');
@@ -129,8 +124,8 @@ export function App() {
     }
   };
 
-  const stByteLength = getByteLength(searchTerms);
-  const isStOverLimit = stByteLength > 249;
+  const stByteLength: number = getByteLength(searchTerms);
+  const isStOverLimit: boolean = stByteLength > 249;
 
   return (
     <div className="min-h-screen bg-slate-50 text-slate-800 p-4 sm:p-8">
@@ -318,7 +313,6 @@ export function App() {
                         </div>
                         <p className="text-sm text-slate-800 leading-relaxed select-all">{bullet}</p>
 
-                        {/* 违规错误提示 */}
                         {val && val.errors.length > 0 && (
                           <div className="space-y-1">
                             {val.errors.map((err: string, ei: number) => (
@@ -329,7 +323,6 @@ export function App() {
                           </div>
                         )}
 
-                        {/* 警告提示 */}
                         {val && val.warnings.length > 0 && (
                           <div className="space-y-1">
                             {val.warnings.map((warn: string, wi: number) => (
