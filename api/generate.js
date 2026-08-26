@@ -1,136 +1,120 @@
 /**
- * Vercel Serverless Function - 模型代理层
- * 读取 process.env.SILICONFLOW_API_KEY，向硅基流动发起真实请求
- * 前端不再接触任何密钥
+ * Vercel Serverless Function - AI Listing & Search Terms Generator
  */
 
-export default async function handler(req, res) {
-  // CORS
-  res.setHeader("Access-Control-Allow-Origin", "*");
-  res.setHeader("Access-Control-Allow-Methods", "POST, OPTIONS");
-  res.setHeader("Access-Control-Allow-Headers", "Content-Type");
-  if (req.method === "OPTIONS") {
-    return res.status(200).end();
-  }
-  if (req.method !== "POST") {
-    return res.status(405).json({ error: "Method Not Allowed, use POST" });
+export const config = {
+  runtime: 'edge',
+};
+
+export default async function handler(req) {
+  const corsHeaders = {
+    'Access-Control-Allow-Origin': '*',
+    'Access-Control-Allow-Methods': 'POST, OPTIONS',
+    'Access-Control-Allow-Headers': 'Content-Type, Authorization',
+  };
+
+  if (req.method === 'OPTIONS') {
+    return new Response(null, { status: 200, headers: corsHeaders });
   }
 
-  const apiKey = process.env.SILICONFLOW_API_KEY;
-  if (!apiKey) {
-    return res.status(500).json({ error: "Server misconfigured: SILICONFLOW_API_KEY not set in Vercel Environment Variables" });
+  if (req.method !== 'POST') {
+    return new Response(JSON.stringify({ error: 'Method Not Allowed' }), {
+      status: 405,
+      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+    });
   }
-
-  let body = req.body;
-  // Vercel 有时 body 是字符串
-  if (typeof body === "string") {
-    try { body = JSON.parse(body); } catch { return res.status(400).json({ error: "Invalid JSON body" }); }
-  }
-
-  const { action = "generate", productName, sellingPoints, platform, title, highlights, normalizedPoints } = body || {};
 
   try {
-    if (action === "generate") {
-      if (!productName || !sellingPoints || !platform) {
-        return res.status(400).json({ error: "Missing required fields: productName, sellingPoints, platform" });
-      }
-      const normalized = (sellingPoints || "").trim().replace(/[\/／]/g, "、").replace(/[,，]/g, "、");
-      const platformLabelMap = {
-        "amazon-en": "Amazon-英文",
-        "amazon-de": "Amazon-德文",
-        "tiktok-en": "TikTok-英文",
-      };
-      const langMap = {
-        "amazon-en": "英文（Amazon.com）",
-        "amazon-de": "德文（Amazon.de）",
-        "tiktok-en": "英文（TikTok Shop）",
-      };
-      const platformLabel = platformLabelMap[platform] || platform;
-      const systemPrompt = `You are a senior cross-border e-commerce listing specialist for ${platformLabel}. Your task is to write a listing based on Product Facts.
+    const { productName, sellingPoints, platform = 'amazon-us', action = 'generate' } = await req.json();
 
-<Product_Facts>
-${normalized}
-</Product_Facts>
-
-Product Facts are the single source of truth. You MUST strictly base your description ONLY on the <Product_Facts>. NEVER invent, infer, or fabricate any technical specifications, numerical values, battery life, wireless versions (e.g., Bluetooth 5.0), materials, or certifications (eco-friendly/anti-bacterial etc.) that are not explicitly listed.
-
-Requirements (Amazon 2026.07.27):
-1. Output exactly 1 Title (Item Name) + 1 Item Highlights + 5 Bullet Points. Both Title and Highlights are searchable, do not duplicate keywords between them.
-   - Title (Item Name): characterCount <= 75 including spaces. Must front-load Brand + Product Type + 1-2 core keywords within first 60 chars for mobile. Use Title Case (English: "Waterproof Bluetooth Speaker for Outdoor Use"; German: noun capitalization). NOT ALL CAPS. No markdown, no emoji, no special chars ! $ ? _ { } ^ ¬ ¦ ™ ® © € £ ¥, no promotional words (best/guaranteed/on sale/free shipping/premium/high-quality), no keyword stuffing (same word <=2 times), no repeated words, no invented specs. The title you output MUST already be <=75 characters - the validator will reject any title over 75 and trigger regeneration, do not output a truncated title with substring.
-   - Item Highlights: characterCount <=125 including spaces. Provide 1 concise line for secondary attributes (material/dimensions/compatibility/use case). No markdown, no emoji, no special chars, no promotional words, no repetition. Must differ from Title.
-   - Bullets: Exactly 5. Each bullet must start with ALL CAPS keyword + colon (e.g., "IP67 WATERPROOF DESIGN:"), then FACT + BENEFIT structure. Each bullet 10-255 chars, recommended <=200 for mobile, at least 100 chars. Use sentence fragments with semicolons to separate phrases. Write numbers one to nine in full except model/measurement. Absolutely prohibited words: perfect, amazing, ultimate, reliable and other meaningless adjectives. Absolutely prohibited sentence patterns: Whether you're..., you can trust..., etc. No markdown, no emoji, no special chars ™ ® © € £ ¥, no placeholder N/A/TBD, no guarantee phrases, no external links, no ASINs, no unverified claims (eco-friendly/anti-bacterial/made from bamboo unless explicitly in Product Facts). Use cold, objective, direct pain-point language.
-2. Output language must be【${langMap[platform] || platform}】, translate Chinese facts into idiomatic target language, never copy Chinese verbatim. For German, apply German capitalization rules.
-3. Strictly follow plain text format: "【商品标题】" then "【商品亮点】" then "【五点描述】" sections only, no extra explanations or greetings.`;
-
-      const userPrompt = `产品中文名称：${productName.trim()}\n中文核心卖点：<Product_Facts>${normalized}</Product_Facts>`;
-
-      const controller = new AbortController();
-      const timer = setTimeout(() => controller.abort(), 45000);
-      const r = await fetch("https://api.siliconflow.cn/v1/chat/completions", {
-        method: "POST",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` },
-        body: JSON.stringify({
-          model: "Qwen/Qwen2.5-72B-Instruct",
-          messages: [
-            { role: "system", content: systemPrompt },
-            { role: "user", content: userPrompt },
-          ],
-          temperature: 0.7,
-          max_tokens: 2000,
-          top_p: 0.9,
-        }),
-        signal: controller.signal,
+    if (!productName && !sellingPoints) {
+      return new Response(JSON.stringify({ error: '缺少必要的商品信息' }), {
+        status: 400,
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       });
-      clearTimeout(timer);
-      if (!r.ok) {
-        const errText = await r.text();
-        return res.status(r.status).json({ error: `SiliconFlow HTTP ${r.status}: ${errText.slice(0, 500)}` });
-      }
-      const data = await r.json();
-      const content = data?.choices?.[0]?.message?.content;
-      if (!content) return res.status(502).json({ error: "Empty response from SiliconFlow" });
-      return res.status(200).json({ content });
     }
 
-    if (action === "compressTitle") {
-      if (!title) return res.status(400).json({ error: "Missing title for compressTitle" });
-      const tLimit = platform === "tiktok-en" ? 80 : 75;
-      const prompt = `Compress this ${platform === "tiktok-en" ? "TikTok" : "Amazon"} ${platform === "amazon-de" ? "DE" : "US"} title to <=${tLimit} characters including spaces, keep natural ${platform === "amazon-de" ? "German" : "Title Case"}, no ALL CAPS, no markdown, ${platform === "tiktok-en" ? "" : "no emoji,"} no promotional words, front-load brand within 60 chars: "${title}" Product: "${(productName||"").trim()}" Facts: "${(normalizedPoints||sellingPoints||"").toString().slice(0,300)}" Platform: ${platform}. Output ONLY the title.`;
-      const r = await fetch("https://api.siliconflow.cn/v1/chat/completions", {
-        method: "POST",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` },
-        body: JSON.stringify({ model: "Qwen/Qwen2.5-72B-Instruct", messages: [{ role: "user", content: prompt }], temperature: 0.3, max_tokens: 200 }),
+    const apiKey = process.env.SILICONFLOW_API_KEY;
+    if (!apiKey) {
+      return new Response(JSON.stringify({ error: '服务端未配置 SILICONFLOW_API_KEY' }), {
+        status: 500,
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       });
-      if (!r.ok) {
-        const errText = await r.text();
-        return res.status(r.status).json({ error: `CompressTitle HTTP ${r.status}: ${errText.slice(0,500)}` });
-      }
-      const data = await r.json();
-      const content = (data?.choices?.[0]?.message?.content?.trim().split("\n")[0] || "").replace(/^["“”]+|["“”]+$/g, "").trim();
-      return res.status(200).json({ content });
     }
 
-    if (action === "compressHighlights") {
-      if (!highlights) return res.status(400).json({ error: "Missing highlights for compressHighlights" });
-      const prompt = `Compress this Amazon Item Highlights to <=125 characters including spaces, keep concise, no promotional words, no repetition with title "${title || ""}": "${highlights}" Facts: "${(normalizedPoints||sellingPoints||"").toString().slice(0,300)}". Output ONLY the highlights line.`;
-      const r = await fetch("https://api.siliconflow.cn/v1/chat/completions", {
-        method: "POST",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` },
-        body: JSON.stringify({ model: "Qwen/Qwen2.5-72B-Instruct", messages: [{ role: "user", content: prompt }], temperature: 0.3, max_tokens: 200 }),
-      });
-      if (!r.ok) {
-        const errText = await r.text();
-        return res.status(r.status).json({ error: `CompressHighlights HTTP ${r.status}: ${errText.slice(0,500)}` });
-      }
-      const data = await r.json();
-      const content = (data?.choices?.[0]?.message?.content?.trim().split("\n")[0] || "").replace(/^["“”]+|["“”]+$/g, "").trim();
-      return res.status(200).json({ content });
+    const systemPrompt = `你是一名精通跨境电商运营与平台合规规则的资深 Listing 专家。
+你的任务是根据用户提供的商品名称与卖点，生成符合平台算法和搜索权重的高转化 Listing。
+
+【平台合规红线】：
+1. 严禁出现农药/杀虫宣称（如 anti-microbial, sanitize, disinfect, anti-mold）。
+2. 严禁出现医疗/治愈宣称（如 cure, treat, relieve pain, FDA approved）。
+3. 严禁出现绝对化宣传与促销词（如 #1, Best Seller, Top Rated, Money Back Guarantee, Free Shipping, Discount）。
+4. 严禁使用 Emoji、特殊图标（如 ★, ✔, ●）和 HTML 标签。
+5. 针对美国站（amazon-us），尺寸和重量请使用英制单位（in, lbs, oz）或双标；针对欧洲站请使用公制单位（cm, kg, ml）。
+
+【输出格式要求】：
+必须严格按照以下标签输出，不要包含多余的客套话或额外 Markdown 代码块标记：
+
+【商品标题】
+(生成 150-180 字符以内的规范标题，首字母大写，包含品牌位置预留、核心关键词、核心属性、适用场景)
+
+【商品亮点】
+(生成 3 条简短精炼的核心亮点，每条 30-50 字符)
+
+【五点描述】
+1. [简短大写导语] 详细描述说明（150-200字符，突出痛点与功能）
+2. [简短大写导语] 详细描述说明（150-200字符，突出材质与耐用性）
+3. [简短大写导语] 详细描述说明（150-200字符，突出使用场景与便利性）
+4. [简短大写导语] 详细描述说明（150-200字符，突出规格与包装清单）
+5. [简短大写导语] 详细描述说明（150-200字符，突出售后服务支持，禁止出现退款承诺）
+
+【搜索词】
+(生成亚马逊后台 Search Terms，严格限制在 249 字节以内。用空格分隔高相关长尾词、同义词，禁止包含标点符号、连字符、品牌词以及已在标题和五点中出现的词汇)`;
+
+    let userPrompt = `【目标平台】：${platform}
+【商品名称】：${productName}
+【核心卖点/参数】：${sellingPoints}`;
+
+    if (action === 'compressTitle') {
+      userPrompt = `请对以下标题进行精简压缩，要求严格控制在 150 字符以内，同时保留核心大词与核心属性：\n${productName}`;
     }
 
-    return res.status(400).json({ error: `Unknown action: ${action}` });
+    const response = await fetch('https://api.siliconflow.cn/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${apiKey}`,
+      },
+      body: JSON.stringify({
+        model: 'Qwen/Qwen2.5-72B-Instruct',
+        messages: [
+          { role: 'system', content: systemPrompt },
+          { role: 'user', content: userPrompt },
+        ],
+        temperature: 0.7,
+        max_tokens: 2048,
+      }),
+    });
+
+    if (!response.ok) {
+      const errText = await response.text();
+      return new Response(JSON.stringify({ error: `API 调用失败: ${response.status}`, details: errText }), {
+        status: response.status,
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      });
+    }
+
+    const data = await response.json();
+    const reply = data.choices?.[0]?.message?.content || '';
+
+    return new Response(JSON.stringify({ result: reply }), {
+      status: 200,
+      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+    });
   } catch (err) {
-    console.error("[api/generate] error", err);
-    const isAbort = err && err.name === "AbortError";
-    return res.status(isAbort ? 504 : 500).json({ error: isAbort ? "Upstream timeout (45s)" : (err.message || "Internal Server Error") });
+    return new Response(JSON.stringify({ error: '服务器内部错误', message: err.message }), {
+      status: 500,
+      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+    });
   }
 }
