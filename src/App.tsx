@@ -45,38 +45,53 @@ export function App() {
 
   // 解析大模型返回的标签内容
   const parseAIResult = (raw: string): void => {
-    const titleMatch = raw.match(/【商品标题】\s*([\s\S]*?)(?=【商品亮点】|【五点描述】|【搜索词】|$)/);
-    const parsedTitle: string = (titleMatch && titleMatch) ? titleMatch.trim() : '';
+  const titleMatch = raw.match(
+    /【商品标题】\s*([\s\S]*?)(?=【商品亮点】|【五点描述】|【搜索词】|$)/
+  );
 
-    const hlMatch = raw.match(/【商品亮点】\s*([\s\S]*?)(?=【五点描述】|【搜索词】|$)/);
-    const parsedHighlights: string[] = (hlMatch && hlMatch)
-      ? hlMatch
-          .split('\n')
-          .map((line: string) => line.replace(/^[-*•\d]+[.)、\s]*/, '').trim())
-          .filter((line: string) => Boolean(line))
-      : [];
+  const parsedTitle: string = titleMatch?.[1]?.trim() ?? '';
 
-    const bulletMatch = raw.match(/【五点描述】\s*([\s\S]*?)(?=【搜索词】|$)/);
-    const parsedBullets: string[] = (bulletMatch && bulletMatch)
-      ? bulletMatch
-          .split('\n')
-          .map((line: string) => line.replace(/^\d+\.\s*/, '').trim())
-          .filter((line: string) => Boolean(line))
-      : [];
+  const hlMatch = raw.match(
+    /【商品亮点】\s*([\s\S]*?)(?=【五点描述】|【搜索词】|$)/
+  );
 
-    const stMatch = raw.match(/【搜索词】\s*([\s\S]*?)$/);
-    const parsedSearchTerms: string = (stMatch && stMatch) ? stMatch.trim().replace(/\n+/g, ' ') : '';
+  const parsedHighlights: string[] = hlMatch?.[1]
+    ? hlMatch[1]
+        .split('\n')
+        .map((line: string) =>
+          line.replace(/^[-*•\d]+[.)、\s]*/, '').trim()
+        )
+        .filter((line: string) => Boolean(line))
+    : [];
 
-    setTitle(parsedTitle);
-    setHighlights(parsedHighlights);
-    setBullets(parsedBullets);
-    setSearchTerms(parsedSearchTerms);
+  const bulletMatch = raw.match(
+    /【五点描述】\s*([\s\S]*?)(?=【搜索词】|$)/
+  );
 
-    if (parsedBullets.length > 0) {
-      const validation = validateAllBullets(parsedBullets);
-      setBulletValidation(validation);
-    }
-  };
+  const parsedBullets: string[] = bulletMatch?.[1]
+    ? bulletMatch[1]
+        .split('\n')
+        .map((line: string) =>
+          line.replace(/^\d+\.\s*/, '').trim()
+        )
+        .filter((line: string) => Boolean(line))
+    : [];
+
+  const stMatch = raw.match(/【搜索词】\s*([\s\S]*?)$/);
+
+  const parsedSearchTerms: string =
+    stMatch?.[1]?.trim().replace(/\n+/g, ' ') ?? '';
+
+  setTitle(parsedTitle);
+  setHighlights(parsedHighlights);
+  setBullets(parsedBullets);
+  setSearchTerms(parsedSearchTerms);
+
+  if (parsedBullets.length > 0) {
+    const validation = validateAllBullets(parsedBullets);
+    setBulletValidation(validation);
+  }
+};
 
   // 提交生成请求
   const handleGenerate = async (e: React.FormEvent<HTMLFormElement>): Promise<void> => {
