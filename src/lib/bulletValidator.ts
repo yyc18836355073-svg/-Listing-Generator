@@ -1,183 +1,68 @@
 /**
- * Bullet Validator - 对齐 Amazon 2024.08.15 五点新规
- * 纯确定性校验，不依赖 AI
+ * 跨境电商平台（重点针对 Amazon 2024/2026 规则）高危违规词与侵权词库
  */
 
-export type BulletViolationType =
-  | "TOO_SHORT"
-  | "OVER_LENGTH"
-  | "OVER_RECOMMENDED"
-  | "BANNED_PHRASE"
-  | "SPECIAL_CHAR"
-  | "EMOJI"
-  | "MARKDOWN"
-  | "PLACEHOLDER"
-  | "GUARANTEE"
-  | "EXTERNAL_LINK"
-  | "REPEATED_CONTENT"
-  | "MISSING_HEADER"
-  | "END_PUNCTUATION"
-  | "NUMERAL_WORD"
-  | "UNIT_SPACE";
+export interface BannedWordRule {
+  pattern: RegExp;
+  word: string;
+  category: 'pesticide' | 'medical' | 'promotional' | 'trademark' | 'environmental' | 'restricted';
+  reason: string;
+}
 
-export type BulletValidationResult = {
-  valid: boolean;
-  length: number;
-  violations: { type: BulletViolationType; message: string }[];
-};
+export const BANNED_RULES: BannedWordRule[] = [
+  // 1. 农药与杀虫相关误判词（Pesticide Claims - 亚马逊最易触发下架的高危词）
+  { pattern: /\b(anti[- ]?microbial)\b/i, word: 'antimicrobial', category: 'pesticide', reason: '易触发亚马逊农药杀虫剂（Pesticide）算法误判下架' },
+  { pattern: /\b(anti[- ]?bacterial)\b/i, word: 'antibacterial', category: 'pesticide', reason: '抗菌宣称需 EPA 认证，普通商品禁止使用' },
+  { pattern: /\b(anti[- ]?fungal)\b/i, word: 'antifungal', category: 'pesticide', reason: '防真菌属于农药/医疗管控宣称' },
+  { pattern: /\b(anti[- ]?mold|mildew[- ]?resistant)\b/i, word: 'anti-mold', category: 'pesticide', reason: '防霉/抗霉宣称极易触发农药审核' },
+  { pattern: /\b(disinfectant|disinfecting|disinfect)\b/i, word: 'disinfectant', category: 'pesticide', reason: '消毒宣称属于农药监管范畴' },
+  { pattern: /\b(sanitize|sanitizing|sanitizer)\b/i, word: 'sanitize', category: 'pesticide', reason: '除菌/消毒宣称极易被系统抓取下架' },
+  { pattern: /\b(sterilize|sterilizing|sterilization)\b/i, word: 'sterilize', category: 'pesticide', reason: '杀菌/灭菌属于高危违规词' },
+  { pattern: /\b(repel(s|ling)? insects?|mosquito repellent)\b/i, word: 'insect repellent', category: 'pesticide', reason: '驱虫宣称属于杀虫剂类目' },
 
-const BANNED_PHRASES = [
-  "eco-friendly", "environmentally friendly", "ecologically friendly",
-  "anti-microbial", "anti-bacterial", "antibacterial",
-  "made from bamboo", "contains bamboo", "made from soy", "contains soy",
-  "best on the market", "top rated", "best seller", "bestseller"
+  // 2. 医疗与疗效宣称（Medical Claims - FDA 监管红线）
+  { pattern: /\b(fda approved|fda certified)\b/i, word: 'FDA approved', category: 'medical', reason: '严禁擅自使用 FDA 认证标识或宣称' },
+  { pattern: /\b(cure(s|d)?|healing)\b/i, word: 'cure', category: 'medical', reason: '治疗宣称属于医疗药物管控' },
+  { pattern: /\b(treat(s|ment)? disease|prevent(s|ing)? disease)\b/i, word: 'treat disease', category: 'medical', reason: '防病/治病宣称属于医疗违规' },
+  { pattern: /\b(relieve(s)? pain|pain relief)\b/i, word: 'pain relief', category: 'medical', reason: '止痛宣称需医疗器械合规资质' },
+  { pattern: /\b(medical grade|hospital grade)\b/i, word: 'medical grade', category: 'medical', reason: '非专业医疗用品禁止使用医用级宣称' },
+
+  // 3. 绝对化、虚假宣传与促销引导词（Promotional / Subjective）
+  { pattern: /\b(#1|number one|no\.1)\b/i, word: '#1', category: 'promotional', reason: '亚马逊政策禁止使用绝对化第一宣称' },
+  { pattern: /\b(best seller|bestseller)\b/i, word: 'best seller', category: 'promotional', reason: '平台禁止在文案中声称自己是畅销榜首' },
+  { pattern: /\b(top[- ]?rated)\b/i, word: 'top rated', category: 'promotional', reason: '主观评价词汇，违背亚马逊 Listing 规则' },
+  { pattern: /\b(money[- ]?back guarantee|satisfaction guarantee)\b/i, word: 'money back guarantee', category: 'promotional', reason: '禁止在描述中包含退款承诺或售后保证条款' },
+  { pattern: /\b(free shipping|free delivery)\b/i, word: 'free shipping', category: 'promotional', reason: '运费信息属于 Offer 字段，禁止写入 Listing 详情' },
+  { pattern: /\b(cheapest|lowest price|discount|sale)\b/i, word: 'lowest price', category: 'promotional', reason: '价格与折扣促销词禁止写入标题与五点' },
+  { pattern: /\b(lifetime warranty)\b/i, word: 'lifetime warranty', category: 'promotional', reason: '终身保修宣传在部分站点受到严格合规限制' },
+
+  // 4. 常见第三方注册商标侵权词（Trademark Infringement）
+  { pattern: /\b(velcro)\b/i, word: 'Velcro', category: 'trademark', reason: 'Velcro 为注册商标，建议改为 hook and loop fastener' },
+  { pattern: /\b(thermos)\b/i, word: 'Thermos', category: 'trademark', reason: 'Thermos 为膳魔师注册商标，建议改为 insulated flask' },
+  { pattern: /\b(gore[- ]?tex)\b/i, word: 'Gore-Tex', category: 'trademark', reason: 'Gore-Tex 为注册商标，建议改为 waterproof breathable fabric' },
+  { pattern: /\b(band[- ]?aid)\b/i, word: 'Band-Aid', category: 'trademark', reason: 'Band-Aid 为强生注册商标，建议改为 adhesive bandage' },
+
+  // 5. 未经认证的环保与材质虚假宣称（Environmental / Material Claims）
+  { pattern: /\b(eco[- ]?friendly|environmentally friendly)\b/i, word: 'eco-friendly', category: 'environmental', reason: '亚马逊 2024 新规要求环保宣称必须提供对应认证，否则会被限流' },
+  { pattern: /\b(100% biodegradable|fully biodegradable)\b/i, word: '100% biodegradable', category: 'environmental', reason: '降解宣称需提供第三方合规证书' },
+  { pattern: /\b(contains bamboo)\b/i, word: 'contains bamboo', category: 'restricted', reason: '纺织类目竹纤维（Bamboo-derived）需标注 Viscose/Rayon 否则违规' },
 ];
 
-const PLACEHOLDERS = ["n/a", "na", "not applicable", "tbd", "to be decided", "yet to decide", "copy pending"];
-
-const GUARANTEE_PHRASES = ["money-back guarantee", "full refund", "money back", "100% guarantee", "satisfaction guarantee"];
-
-const EXTERNAL_LINK_PATTERN = /(https?:\/\/|www\.|\.com|\.net|\.org|@\w+\.\w+|phone:|tel:)/i;
-const ASIN_PATTERN = /\bB0[A-Z0-9]{8}\b/;
-
-// 测量/技术单位：数字后跟这些单位视为"型号/测量"，不要求拼写1-9
-const MEASURE_UNITS = /^(ml|l|oz|cm|mm|km|m|in|inch|inches|ft|kg|g|lb|lbs|w|wh|mah|v|a|hz|ghz|khz|db|min|mins|hr|hrs|hour|hours|day|days|°|degrees|%|x|pack|pcs|ct|count|gb|tb|mb|watt|watts|volt|volts|amp|amps)$/i;
-// 物理单位：官方要求数字与单位间带空格（60 ml），这些连写时提示
-const SPACE_UNITS = /^(ml|oz|cm|mm|km|kg|lb|lbs|inch|inches|ft|g|in)$/i;
-
-export function validateBullet(bullet: string): BulletValidationResult {
-  const violations: BulletValidationResult["violations"] = [];
-  const trimmed = bullet.trim();
-  const length = [...trimmed].length;
-
-  if (length < 10) {
-    violations.push({ type: "TOO_SHORT", message: `过短（${length} < 10）` });
-  }
-  if (length > 255) {
-    violations.push({ type: "OVER_LENGTH", message: `超出五点长度限制（${length} / 255）` });
-  } else if (length > 200) {
-    violations.push({ type: "OVER_RECOMMENDED", message: `超过推荐长度（${length} > 200，移动端可能截断）` });
-  }
-
-  const lower = trimmed.toLowerCase();
-
-  // 禁用声明
-  for (const phrase of BANNED_PHRASES) {
-    if (lower.includes(phrase.toLowerCase())) {
-      violations.push({ type: "BANNED_PHRASE", message: `包含禁用声明: ${phrase}` });
-      break;
+/**
+ * 校验文本中的所有违规词
+ */
+export function checkBannedWords(text: string): { word: string; reason: string; category: string }[] {
+  const violations: { word: string; reason: string; category: string }[] = [];
+  
+  for (const rule of BANNED_RULES) {
+    if (rule.pattern.test(text)) {
+      violations.push({
+        word: rule.word,
+        reason: rule.reason,
+        category: rule.category,
+      });
     }
   }
 
-  // 占位符
-  for (const ph of PLACEHOLDERS) {
-    if (lower === ph || lower.includes(ph)) {
-      // 避免误判正常 "not applicable" 在长句中？仅当单独或明确占位时
-      if (trimmed.length < 30 && lower.includes(ph)) {
-        violations.push({ type: "PLACEHOLDER", message: `包含占位符: ${ph}` });
-        break;
-      }
-    }
-  }
-
-  // 担保
-  for (const g of GUARANTEE_PHRASES) {
-    if (lower.includes(g)) {
-      violations.push({ type: "GUARANTEE", message: `包含担保承诺: ${g}` });
-      break;
-    }
-  }
-
-  // 外链/ASIN
-  if (EXTERNAL_LINK_PATTERN.test(trimmed)) {
-    violations.push({ type: "EXTERNAL_LINK", message: "包含外链/联系方式" });
-  }
-  if (ASIN_PATTERN.test(trimmed)) {
-    violations.push({ type: "EXTERNAL_LINK", message: "包含 ASIN" });
-  }
-
-  // 特殊字符 & Emoji & Markdown
-  if (/\*\*/.test(trimmed) || /__/.test(trimmed) || /~~/.test(trimmed)) {
-    violations.push({ type: "MARKDOWN", message: "包含 Markdown 符号" });
-  }
-  if (/[\u{1F300}-\u{1F9FF}\u{2600}-\u{26FF}\u{2700}-\u{27BF}]/u.test(trimmed)) {
-    violations.push({ type: "EMOJI", message: "包含 Emoji" });
-  }
-  if (/[™®©€£¥†‡…±]/.test(trimmed) || /[!$?_{}^¬¦]/.test(trimmed)) {
-    violations.push({ type: "SPECIAL_CHAR", message: "包含禁用特殊字符" });
-  }
-
-  // 头部格式：应以大写词+冒号开头（允许数字/点，如 7.5W/5.2）
-  if (!/^[A-Z0-9][A-Z0-9\s\-\.]{2,30}:/.test(trimmed)) {
-    violations.push({ type: "MISSING_HEADER", message: "建议以全大写头+冒号开头（如 'IP67 WATERPROOF:'）" });
-  }
-
-  // 句尾标点：句段式不使用句尾标点
-  if (/[.!?。]$/.test(trimmed)) {
-    violations.push({ type: "END_PUNCTUATION", message: "句段式结尾不应使用句号/叹号等标点" });
-  }
-
-  // 数字1-9拼写（型号/测量豁免）
-  const numeralRegex = /(?<![\d.\-])[1-9](?![\d.])/g;
-  let nm: RegExpExecArray | null;
-  while ((nm = numeralRegex.exec(trimmed)) !== null) {
-    const num = nm[0];
-    const idx = nm.index;
-    // 向后取紧跟的词，判断是否测量/技术单位
-    const rest = trimmed.slice(idx + 1);
-    const nextWordMatch = rest.match(/^\s*([A-Za-z%°]+)/);
-    const nextWord = nextWordMatch ? nextWordMatch[1] : "";
-    // 数字后紧跟连字符（2-in-1 / 3-in-1）视为技术词
-    const dashAfter = /^\s*-/.test(rest);
-    if (MEASURE_UNITS.test(nextWord) || dashAfter) continue;
-    violations.push({ type: "NUMERAL_WORD", message: `数字 ${num} 建议拼写为英文（非型号/测量）` });
-  }
-
-  // 数字与单位空格：物理单位应带空格（60 ml）
-  const unitSpaceRegex = /(\d+(?:\.\d+)?)(ml|oz|cm|mm|km|kg|lb|lbs|inch|inches|ft|g|in)\b/gi;
-  let us: RegExpExecArray | null;
-  while ((us = unitSpaceRegex.exec(trimmed)) !== null) {
-    const unit = us[2];
-    // 若数字与单位紧贴（无空格）则提示
-    if (SPACE_UNITS.test(unit)) {
-      violations.push({ type: "UNIT_SPACE", message: `数字与单位建议加空格（如 "${us[1]} ${unit}"）` });
-    }
-  }
-
-  const WARNING_ONLY = new Set(["OVER_RECOMMENDED", "MISSING_HEADER", "END_PUNCTUATION", "NUMERAL_WORD", "UNIT_SPACE"]);
-  return { valid: violations.filter(v => !WARNING_ONLY.has(v.type)).length === 0, length, violations };
-}
-
-export function validateBullets(bullets: string[]): {
-  bulletResults: BulletValidationResult[];
-  totalLength: number;
-  hasDuplicates: boolean;
-  duplicateMessages: string[];
-} {
-  const bulletResults = bullets.map(validateBullet);
-  const totalLength = bullets.reduce((sum, b) => sum + [...b].length, 0);
-  const seen = new Map<string, number>();
-  const duplicateMessages: string[] = [];
-  for (const b of bullets) {
-    const key = b.toLowerCase().trim().slice(0, 40);
-    const count = seen.get(key) || 0;
-    seen.set(key, count + 1);
-    if (count >= 1) duplicateMessages.push(`重复内容: "${b.slice(0, 30)}..."`);
-  }
-  // 校验五点间高度重复（前40字符相同）
-  const uniqueKeys = new Set(bullets.map(b => b.toLowerCase().trim().slice(0, 40)));
-  const hasDuplicates = uniqueKeys.size < bullets.length;
-  return { bulletResults, totalLength, hasDuplicates, duplicateMessages };
-}
-
-export function getBulletDisplay(bullet: string) {
-  const result = validateBullet(bullet);
-  if (result.valid && result.length <= 200) {
-    return { text: `${result.length} / 255`, status: "ok" as const, message: "✓ 合规" };
-  }
-  const over = result.violations.find(v => v.type === "OVER_LENGTH");
-  if (over) return { text: `${result.length} / 255`, status: "over" as const, message: "✕ 超出长度" };
-  const warn = result.violations.find(v => v.type === "OVER_RECOMMENDED");
-  if (warn) return { text: `${result.length} / 255`, status: "warning" as const, message: "⚠ 超200建议优化" };
-  return { text: `${result.length} / 255`, status: "warning" as const, message: "⚠ 建议优化" };
+  return violations;
 }
