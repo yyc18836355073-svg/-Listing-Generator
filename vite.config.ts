@@ -8,7 +8,7 @@ export default defineConfig({
     react(),
     VitePWA({
       registerType: "autoUpdate",
-      includeAssets: ["favicon.svg", "vite.svg"],
+      includeAssets: ["favicon.svg", "icons.svg"],
       manifest: {
         name: "跨境电商 Listing 智能生成台",
         short_name: "Listing台",
@@ -19,8 +19,8 @@ export default defineConfig({
         scope: "./",
         start_url: "./",
         icons: [
-          { src: "vite.svg", sizes: "192x192", type: "image/svg+xml", purpose: "any" },
-          { src: "vite.svg", sizes: "512x512", type: "image/svg+xml", purpose: "any maskable" },
+          { src: "favicon.svg", sizes: "192x192", type: "image/svg+xml", purpose: "any" },
+          { src: "favicon.svg", sizes: "512x512", type: "image/svg+xml", purpose: "any maskable" },
         ],
       },
       workbox: { globPatterns: ["**/*.{js,css,html,svg,png,woff2}"] },
