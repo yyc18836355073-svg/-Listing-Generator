@@ -10,10 +10,14 @@ function getByteLength(str: string): number {
 // 安全提取正则捕获组文本（严格类型校验）
 function getMatchedGroup(str: string, regex: RegExp): string {
   const match: RegExpExecArray | null = regex.exec(str);
-  if (!match || typeof match !== 'string') {
+  
+  // 校验 match 是否存在，以及我们需要的捕获组（通常是 match[1]）是否存在
+  if (!match || !match[1]) {
     return '';
   }
-  return match.trim();
+  
+  // 直接对捕获到的字符串执行 trim
+  return match[1].trim();
 }
 
 // 智能提取五点（精准按 1-5 序号分割，即使内部换行也会自动合并为 5 条）
