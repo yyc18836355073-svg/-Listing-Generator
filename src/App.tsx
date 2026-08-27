@@ -7,10 +7,13 @@ function getByteLength(str: string): number {
   return new TextEncoder().encode(str).length;
 }
 
-// 安全提取正则捕获组文本
+// 安全提取正则捕获组文本（严格类型校验）
 function getMatchedGroup(str: string, regex: RegExp): string {
   const match: RegExpExecArray | null = regex.exec(str);
-  return match && match ? match.trim() : '';
+  if (!match || typeof match !== 'string') {
+    return '';
+  }
+  return match.trim();
 }
 
 // 智能提取五点（精准按 1-5 序号分割，即使内部换行也会自动合并为 5 条）
@@ -109,7 +112,7 @@ export function App() {
     const parsedHighlights: string[] = hlText
       ? hlText
           .split('\n')
-          .map((line: string) => line.replace(/^[-*•\d]+[.)、\s]*/, '').trim())
+          .map((line: string) => line.replace(/^(\d+[\.、\)]|[-*•])\s*/, '').trim())
           .filter((line: string) => Boolean(line))
       : [];
 
@@ -176,9 +179,8 @@ export function App() {
     }
   };
 
-  // 【新增：一键合规智能修复】
+  // 【一键合规智能修复】
   const handleAutoFix = async (): Promise<void> => {
-    // 汇总当前所有检测到的问题
     const collectedViolations: string[] = [];
     if (title.length > 200) {
       collectedViolations.push(`标题长度（${title.length} 字符）超过 200 字符上限，需精简`);
