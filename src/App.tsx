@@ -137,6 +137,62 @@ export function App() {
     }
   };
 
+  // ================= 核心：一键合规修复逻辑 =================
+  const handleAutoFix = async () => {
+    // 防呆：如果根本没有生成过数据，直接退出
+    if (!title && bullets.length === 0) return; 
+
+    // 触发你第 78 行预留的 loading 状态
+    setFixing(true);
+    setError('');
+
+    try {
+      // 1. 将你散落在各处的旧数据打包
+      const currentListingData = {
+        title: title,
+        highlights: highlights,
+        bullets: bullets,
+        searchTerms: searchTerms
+      };
+
+      // 2. 提取当前违规的警告信息（假设存在你第 91 行的 generalWarnings 里）
+      const currentViolations = bulletValidation?.generalWarnings || [];
+
+      // 3. 向你的 Serverless 后端发送抢救请求
+      const response = await fetch('/api/generate', { 
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'autoFix',             // 触发后端的一键修复分支
+          platform: platform,            // 对应你第 76 行的站点变量
+          currentListing: currentListingData, 
+          violations: currentViolations  
+        })
+      });
+
+      if (!response.ok) throw new Error('网络超时或后端修复失败');
+      
+      const fixedData = await response.json();
+
+      // 4. 用后端洗白后的合规数据，强行覆盖页面的旧状态
+      if (fixedData.title) setTitle(fixedData.title);
+      if (fixedData.highlights) setHighlights(fixedData.highlights);
+      if (fixedData.bullets) setBullets(fixedData.bullets);
+      if (fixedData.searchTerms) setSearchTerms(fixedData.searchTerms);
+
+      // 5. 修复成功后，强行清空页面的飘红报警状态
+      setBulletValidation(null); 
+
+    } catch (err: any) {
+      console.error("修复失败:", err);
+      setError(err.message || "自动修复失败，请重试");
+    } finally {
+      // 关闭你第 78 行的 loading 状态
+      setFixing(false);
+    }
+  };
+  // ========================================================
+
   // 提交生成请求
   const handleGenerate = async (e: React.FormEvent<HTMLFormElement>): Promise<void> => {
     e.preventDefault();
@@ -393,6 +449,13 @@ export function App() {
                 >
                   {copiedSection === 'all' ? '✓ 已复制全部内容' : '📋 一键复制全部'}
                 </button>
+                <button
+  onClick={handleAutoFix}
+  disabled={fixing}
+  className="ml-3 px-4 py-2 bg-amber-500 text-white text-sm font-medium rounded hover:bg-amber-600 disabled:opacity-50 transition-colors"
+>
+  {fixing ? '✨ AI 紧急修复中...' : '🛠️ 一键合规重写'}
+              </button>
               </div>
             </div>
 
