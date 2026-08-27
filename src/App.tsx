@@ -1,387 +1,946 @@
 import React, { useState } from 'react';
-import { validateAllBullets, type BulletValidationResult } from './lib/bulletValidator';
+import {
+  validateAllBullets,
+  type BulletValidationResult,
+} from './lib/bulletValidator';
 
-// 计算 UTF-8 字节长度（亚马逊 Search Terms 严格以字节计算）
 function getByteLength(str: string): number {
   return new TextEncoder().encode(str).length;
 }
 
-export function App() {
-  const [productName, setProductName] = useState<string>('');
-  const [sellingPoints, setSellingPoints] = useState<string>('');
-  const [platform, setPlatform] = useState<string>('amazon-us');
-  const [loading, setLoading] = useState<boolean>(false);
-  const [error, setError] = useState<string>('');
-  const [copiedSection, setCopiedSection] = useState<string | null>(null);
-
-  // 解析后的 Listing 各字段状态
-  const [title, setTitle] = useState<string>('');
-  const [highlights, setHighlights] = useState<string[]>([]);
-  const [bullets, setBullets] = useState<string[]>([]);
-  const [searchTerms, setSearchTerms] = useState<string>('');
-  const [bulletValidation, setBulletValidation] = useState<{
-    results: BulletValidationResult[];
-    totalCharCount: number;
-    isAllValid: boolean;
-    generalWarnings: string[];
-  } | null>(null);
-
-  // 一键复制辅助函数
-  const copyToClipboard = (text: string, sectionKey: string): void => {
-    navigator.clipboard.writeText(text);
-    setCopiedSection(sectionKey);
-    setTimeout(() => setCopiedSection(null), 2000);
-  };
-
-  // 生成全部文案合并内容
-  const getAllContentText = (): string => {
-    let text: string = `【商品标题】\n${title}\n\n【商品亮点】\n${highlights.join('\n')}\n\n【五点描述】\n`;
-    text += bullets.map((b: string, i: number) => `${i + 1}. ${b}`).join('\n');
-    if (searchTerms) {
-      text += `\n\n【Search Terms 后台搜索词】\n${searchTerms}`;
-    }
-    return text;
-  };
-
-  // 解析大模型返回的标签内容
-  const parseAIResult = (raw: string): void => {
-  const titleMatch = raw.match(
-    /【商品标题】\s*([\s\S]*?)(?=【商品亮点】|【五点描述】|【搜索词】|$)/
-  );
-
-  const parsedTitle: string = titleMatch?.[1]?.trim() ?? '';
-
-  const hlMatch = raw.match(
-    /【商品亮点】\s*([\s\S]*?)(?=【五点描述】|【搜索词】|$)/
-  );
-
-  const parsedHighlights: string[] = hlMatch?.[1]
-    ? hlMatch[1]
-        .split('\n')
-        .map((line: string) =>
-          line.replace(/^[-*•\d]+[.)、\s]*/, '').trim()
-        )
-        .filter((line: string) => Boolean(line))
-    : [];
-
-  const bulletMatch = raw.match(
-    /【五点描述】\s*([\s\S]*?)(?=【搜索词】|$)/
-  );
-
-  const parsedBullets: string[] = bulletMatch?.[1]
-    ? bulletMatch[1]
-        .split('\n')
-        .map((line: string) =>
-          line.replace(/^\d+\.\s*/, '').trim()
-        )
-        .filter((line: string) => Boolean(line))
-    : [];
-
-  const stMatch = raw.match(/【搜索词】\s*([\s\S]*?)$/);
-
-  const parsedSearchTerms: string =
-    stMatch?.[1]?.trim().replace(/\n+/g, ' ') ?? '';
-
-  setTitle(parsedTitle);
-  setHighlights(parsedHighlights);
-  setBullets(parsedBullets);
-  setSearchTerms(parsedSearchTerms);
-
-  if (parsedBullets.length > 0) {
-    const validation = validateAllBullets(parsedBullets);
-    setBulletValidation(validation);
+function getTitleStatus(length: number) {
+  if (length === 0) {
+    return {
+      text: '未生成',
+      className: 'bg-slate-100 text-slate-600',
+    };
   }
-};
 
-  // 提交生成请求
-  const handleGenerate = async (e: React.FormEvent<HTMLFormElement>): Promise<void> => {
+  if (length > 200) {
+    return {
+      text: `${length} / 200 字符 · 超限`,
+      className: 'bg-rose-100 text-rose-700',
+    };
+  }
+
+  if (length > 180) {
+    return {
+      text: `${length} / 200 字符`,
+      className: 'bg-amber-100 text-amber-700',
+    };
+  }
+
+  return {
+    text: `${length} / 200 字符`,
+    className: 'bg-emerald-100 text-emerald-700',
+  };
+}
+
+function getSearchTermStatus(bytes: number) {
+  if (bytes === 0) {
+    return {
+      text: '0 / 249 Bytes',
+      className: 'bg-slate-100 text-slate-600',
+    };
+  }
+
+  if (bytes > 249) {
+    return {
+      text: `${bytes} / 249 Bytes · 超限`,
+      className: 'bg-rose-100 text-rose-700',
+    };
+  }
+
+  if (bytes >= 230) {
+    return {
+      text: `${bytes} / 249 Bytes · 接近上限`,
+      className: 'bg-amber-100 text-amber-700',
+    };
+  }
+
+  return {
+    text: `${bytes} / 249 Bytes · 合规`,
+    className: 'bg-emerald-100 text-emerald-700',
+  };
+}
+
+export function App() {
+  const [productName, setProductName] =
+    useState<string>('');
+
+  const [sellingPoints, setSellingPoints] =
+    useState<string>('');
+
+  const [platform, setPlatform] =
+    useState<string>('amazon-us');
+
+  const [loading, setLoading] =
+    useState<boolean>(false);
+
+  const [error, setError] =
+    useState<string>('');
+
+  const [copiedSection, setCopiedSection] =
+    useState<string | null>(null);
+
+  const [title, setTitle] =
+    useState<string>('');
+
+  const [highlights, setHighlights] =
+    useState<string[]>([]);
+
+  const [bullets, setBullets] =
+    useState<string[]>([]);
+
+  const [searchTerms, setSearchTerms] =
+    useState<string>('');
+
+  const [bulletValidation, setBulletValidation] =
+    useState<{
+      results: BulletValidationResult[];
+      totalCharCount: number;
+      isAllValid: boolean;
+      generalWarnings: string[];
+    } | null>(null);
+
+  const copyToClipboard = async (
+    text: string,
+    sectionKey: string
+  ) => {
+    try {
+      await navigator.clipboard.writeText(text);
+
+      setCopiedSection(sectionKey);
+
+      setTimeout(() => {
+        setCopiedSection(null);
+      }, 2000);
+    } catch {
+      setError('复制失败，请手动选择文字复制');
+    }
+  };
+
+  const getAllContentText = () => {
+    let text = '';
+
+    if (title) {
+      text += `【商品标题】\n${title}\n\n`;
+    }
+
+    if (highlights.length > 0) {
+      text += `【核心亮点】\n`;
+      text += highlights.join('\n');
+      text += '\n\n';
+    }
+
+    if (bullets.length > 0) {
+      text += `【五点描述】\n`;
+      text += bullets
+        .map(
+          (bullet, index) =>
+            `${index + 1}. ${bullet}`
+        )
+        .join('\n');
+
+      text += '\n\n';
+    }
+
+    if (searchTerms) {
+      text += `【Search Terms】\n${searchTerms}`;
+    }
+
+    return text.trim();
+  };
+
+  const parseAIResult = (raw: string) => {
+    const titleMatch = raw.match(
+      /【商品标题】\s*([\s\S]*?)(?=【商品亮点】|【核心亮点】|【五点描述】|【搜索词】|$)/
+    );
+
+    const highlightMatch = raw.match(
+      /(?:【商品亮点】|【核心亮点】)\s*([\s\S]*?)(?=【五点描述】|【搜索词】|$)/
+    );
+
+    const bulletMatch = raw.match(
+      /【五点描述】\s*([\s\S]*?)(?=【搜索词】|$)/
+    );
+
+    const searchMatch = raw.match(
+      /【搜索词】\s*([\s\S]*?)$/
+    );
+
+    const parsedTitle =
+      titleMatch?.[1]?.trim() || '';
+
+    const parsedHighlights =
+      highlightMatch?.[1]
+        ? highlightMatch[1]
+            .split('\n')
+            .map((line) =>
+              line
+                .replace(
+                  /^[-*•\d]+[.)、\s]*/,
+                  ''
+                )
+                .trim()
+            )
+            .filter(Boolean)
+        : [];
+
+    const parsedBullets =
+      bulletMatch?.[1]
+        ? bulletMatch[1]
+            .split('\n')
+            .map((line) =>
+              line
+                .replace(
+                  /^\d+[.)、\s]*/,
+                  ''
+                )
+                .trim()
+            )
+            .filter(Boolean)
+        : [];
+
+    const parsedSearchTerms =
+      searchMatch?.[1]
+        ?.trim()
+        .replace(/\n+/g, ' ')
+        .replace(/\s+/g, ' ') || '';
+
+    setTitle(parsedTitle);
+
+    setHighlights(parsedHighlights);
+
+    setBullets(parsedBullets);
+
+    setSearchTerms(parsedSearchTerms);
+
+    if (parsedBullets.length > 0) {
+      const validation =
+        validateAllBullets(
+          parsedBullets
+        );
+
+      setBulletValidation(validation);
+    } else {
+      setBulletValidation(null);
+    }
+  };
+
+  const handleGenerate = async (
+    e: React.FormEvent<HTMLFormElement>
+  ) => {
     e.preventDefault();
-    if (!productName.trim() || !sellingPoints.trim()) {
-      setError('请填写商品名称和核心卖点');
+
+    if (!productName.trim()) {
+      setError(
+        '请填写商品名称或品类核心词'
+      );
+      return;
+    }
+
+    if (!sellingPoints.trim()) {
+      setError(
+        '请填写核心卖点、参数或规格'
+      );
       return;
     }
 
     setLoading(true);
     setError('');
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 45000);
+
+    setTitle('');
+    setHighlights([]);
+    setBullets([]);
+    setSearchTerms('');
+    setBulletValidation(null);
+
+    const controller =
+      new AbortController();
+
+    const timeoutId = setTimeout(() => {
+      controller.abort();
+    }, 60000);
 
     try {
-      const res = await fetch('/api/generate', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ productName, sellingPoints, platform }),
-        signal: controller.signal,
-      });
+      const response = await fetch(
+        '/api/generate',
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type':
+              'application/json',
+          },
+          body: JSON.stringify({
+            productName,
+            sellingPoints,
+            platform,
+          }),
+          signal: controller.signal,
+        }
+      );
+
+      const data = await response.json();
 
       clearTimeout(timeoutId);
-      const data = (await res.json()) as { error?: string; details?: string; result?: string };
 
-      if (!res.ok) {
-        throw new Error(data.error || data.details || '生成失败，请重试');
+      if (!response.ok) {
+        throw new Error(
+          data?.error ||
+            'AI 生成失败，请稍后重试'
+        );
       }
 
-      if (data.result) {
-        parseAIResult(data.result);
+      if (!data?.result) {
+        throw new Error(
+          'AI 没有返回有效内容'
+        );
       }
+
+      parseAIResult(data.result);
     } catch (err: unknown) {
-      if (err instanceof Error) {
-        if (err.name === 'AbortError') {
-          setError('请求超时（45秒），大模型响应较慢，请稍后重试');
-        } else {
-          setError(err.message || '网络请求异常');
-        }
+      clearTimeout(timeoutId);
+
+      if (
+        err instanceof Error &&
+        err.name === 'AbortError'
+      ) {
+        setError(
+          '生成时间较长，请检查网络后重新生成'
+        );
+      } else if (err instanceof Error) {
+        setError(
+          err.message ||
+            '生成失败，请重新尝试'
+        );
       } else {
-        setError('未知错误，请重试');
+        setError(
+          '生成失败，请重新尝试'
+        );
       }
     } finally {
       setLoading(false);
     }
   };
 
-  const stByteLength: number = getByteLength(searchTerms);
-  const isStOverLimit: boolean = stByteLength > 249;
+  const titleStatus =
+    getTitleStatus(title.length);
+
+  const searchBytes =
+    getByteLength(searchTerms);
+
+  const searchStatus =
+    getSearchTermStatus(searchBytes);
+
+  const allValid =
+    bulletValidation?.isAllValid &&
+    bullets.length === 5;
 
   return (
     <div className="min-h-screen bg-slate-50 text-slate-800 p-4 sm:p-8">
       <div className="max-w-4xl mx-auto space-y-6">
-        {/* 顶部标题栏 */}
+
+        {/* ========================= */}
+        {/* Header */}
+        {/* ========================= */}
+
         <header className="text-center space-y-2">
-          <h1 className="text-2xl sm:text-3xl font-bold text-slate-900 tracking-tight">
-            跨境电商 AI Listing 智能合规生成器
+          <h1 className="text-2xl sm:text-3xl font-bold text-slate-900">
+            跨境电商 AI Listing 智能生成器
           </h1>
+
           <p className="text-sm text-slate-500">
-            内置亚马逊 2024/2026 最新合规校验引擎 · 自动生成后台 Search Terms · 违规词与侵权防护
+            Amazon Listing · 五点描述 · Search Terms · 合规检查
           </p>
         </header>
 
-        {/* 输入表单 */}
-        <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-5 sm:p-6">
-          <form onSubmit={handleGenerate} className="space-y-4">
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-              <div className="sm:col-span-2">
-                <label className="block text-sm font-medium text-slate-700 mb-1">
-                  商品名称 / 品类核心词 <span className="text-rose-500">*</span>
-                </label>
-                <input
-                  type="text"
-                  value={productName}
-                  onChange={(e: React.ChangeEvent<HTMLInputElement>) => setProductName(e.target.value)}
-                  placeholder="例如：Stainless Steel Insulated Water Bottle 32oz"
-                  className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
-                  disabled={loading}
-                />
-              </div>
+        {/* ========================= */}
+        {/* 输入区域 */}
+        {/* ========================= */}
 
-              <div>
-                <label className="block text-sm font-medium text-slate-700 mb-1">目标平台 / 站点</label>
-                <select
-                  value={platform}
-                  onChange={(e: React.ChangeEvent<HTMLSelectElement>) => setPlatform(e.target.value)}
-                  className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm bg-white focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
-                  disabled={loading}
-                >
-                  <option value="amazon-us">Amazon 美国站 (US)</option>
-                  <option value="amazon-de">Amazon 德国站 (DE)</option>
-                  <option value="amazon-uk">Amazon 英国站 (UK)</option>
-                  <option value="amazon-jp">Amazon 日本站 (JP)</option>
-                  <option value="temu">Temu 平台</option>
-                  <option value="tiktok-shop">TikTok Shop</option>
-                </select>
-              </div>
-            </div>
+        <div className="bg-white rounded-2xl shadow-sm border border-slate-200 p-5 sm:p-6">
+
+          <form
+            onSubmit={handleGenerate}
+            className="space-y-5"
+          >
+
+            {/* 商品名称 */}
 
             <div>
-              <label className="block text-sm font-medium text-slate-700 mb-1">
-                核心卖点 / 参数与规格 <span className="text-rose-500">*</span>
+              <label className="block text-sm font-semibold text-slate-700 mb-2">
+                商品名称 / 品类核心词
+                <span className="text-rose-500 ml-1">
+                  *
+                </span>
               </label>
-              <textarea
-                value={sellingPoints}
-                onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) => setSellingPoints(e.target.value)}
-                rows={4}
-                placeholder="例如：
-1. 316食品级不锈钢内胆，24小时保温/12小时保冷
-2. 双层真空锁温，防漏手柄盖，带吸管
-3. 容积 32oz / 1000ml，附带清洁刷"
-                className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
+
+              <input
+                type="text"
+                value={productName}
+                onChange={(e) =>
+                  setProductName(
+                    e.target.value
+                  )
+                }
+                placeholder="例如：Portable Bluetooth Speaker"
                 disabled={loading}
+                className="w-full px-4 py-3 border border-slate-300 rounded-xl text-sm outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 disabled:bg-slate-100"
               />
             </div>
 
+            {/* 平台 */}
+
+            <div>
+              <label className="block text-sm font-semibold text-slate-700 mb-2">
+                目标平台 / 站点
+              </label>
+
+              <select
+                value={platform}
+                onChange={(e) =>
+                  setPlatform(
+                    e.target.value
+                  )
+                }
+                disabled={loading}
+                className="w-full px-4 py-3 border border-slate-300 rounded-xl text-sm bg-white outline-none focus:ring-2 focus:ring-blue-500"
+              >
+                <option value="amazon-us">
+                  Amazon 美国站 (US)
+                </option>
+
+                <option value="amazon-de">
+                  Amazon 德国站 (DE)
+                </option>
+
+                <option value="amazon-uk">
+                  Amazon 英国站 (UK)
+                </option>
+
+                <option value="amazon-jp">
+                  Amazon 日本站 (JP)
+                </option>
+
+                <option value="temu">
+                  Temu
+                </option>
+
+                <option value="tiktok-shop">
+                  TikTok Shop
+                </option>
+              </select>
+
+              <p className="mt-2 text-xs text-slate-400">
+                当前版本以 Amazon US 的 Listing
+                规则作为主要优化目标。
+              </p>
+            </div>
+
+            {/* 卖点 */}
+
+            <div>
+              <label className="block text-sm font-semibold text-slate-700 mb-2">
+                核心卖点 / 参数与规格
+                <span className="text-rose-500 ml-1">
+                  *
+                </span>
+              </label>
+
+              <textarea
+                value={sellingPoints}
+                onChange={(e) =>
+                  setSellingPoints(
+                    e.target.value
+                  )
+                }
+                rows={7}
+                disabled={loading}
+                placeholder={`例如：
+
+30W output power
+12 hour playback
+IP67 waterproof
+Bluetooth 5.1
+USB-C charging
+Portable outdoor design
+Dimensions: 7 x 2.6 x 2.8 inches`}
+                className="w-full px-4 py-3 border border-slate-300 rounded-xl text-sm outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 resize-y disabled:bg-slate-100"
+              />
+
+              <p className="mt-2 text-xs text-slate-400">
+                参数越完整，AI 越不容易编造产品信息。
+              </p>
+            </div>
+
+            {/* Error */}
+
             {error && (
-              <div className="p-3 bg-rose-50 border border-rose-200 text-rose-700 text-sm rounded-lg">
-                ⚠️ {error}
+              <div className="p-4 bg-rose-50 border border-rose-200 text-rose-700 rounded-xl text-sm">
+                <div className="font-semibold mb-1">
+                  生成失败
+                </div>
+
+                <div>
+                  {error}
+                </div>
               </div>
             )}
+
+            {/* Button */}
 
             <button
               type="submit"
               disabled={loading}
-              className="w-full py-2.5 px-4 bg-blue-600 hover:bg-blue-700 disabled:bg-blue-400 text-white font-medium rounded-lg text-sm shadow transition-colors flex items-center justify-center space-x-2"
+              className="w-full py-3.5 px-4 bg-blue-600 hover:bg-blue-700 disabled:bg-blue-400 text-white font-semibold rounded-xl shadow-sm transition flex items-center justify-center"
             >
               {loading ? (
                 <>
-                  <svg className="animate-spin h-4 w-4 text-white" viewBox="0 0 24 24" fill="none">
-                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                  <svg
+                    className="animate-spin h-5 w-5 mr-2"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                  >
+                    <circle
+                      className="opacity-25"
+                      cx="12"
+                      cy="12"
+                      r="10"
+                      stroke="currentColor"
+                      strokeWidth="4"
+                    />
+
+                    <path
+                      className="opacity-75"
+                      fill="currentColor"
+                      d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"
+                    />
                   </svg>
-                  <span>正在合规生成中（包含违规词校验与 Search Terms）...</span>
+
+                  正在生成 Listing...
                 </>
               ) : (
-                <span>立即生成高转化 Listing</span>
+                '立即生成高转化 Listing'
               )}
             </button>
+
           </form>
         </div>
 
-        {/* 结果展示区 */}
-        {(title || bullets.length > 0 || searchTerms) && (
+        {/* ========================= */}
+        {/* 结果区域 */}
+        {/* ========================= */}
+
+        {(title ||
+          bullets.length > 0 ||
+          searchTerms) && (
+
           <div className="space-y-5">
-            {/* 顶栏操作 */}
-            <div className="flex items-center justify-between bg-white p-4 rounded-xl border border-slate-200 shadow-sm">
-              <span className="text-sm font-semibold text-slate-800">✅ 生成结果与合规检查</span>
-              <button
-                type="button"
-                onClick={() => copyToClipboard(getAllContentText(), 'all')}
-                className="text-xs px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-md font-medium transition-colors"
-              >
-                {copiedSection === 'all' ? '✓ 已复制全部内容' : '📋 一键复制全部'}
-              </button>
+
+            {/* 总状态 */}
+
+            <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-4">
+
+              <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+
+                <div>
+                  <div className="font-semibold text-slate-900">
+                    生成结果与合规检查
+                  </div>
+
+                  <div className="text-xs text-slate-500 mt-1">
+                    AI 生成后再次进行前端规则检查
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-2">
+
+                  <span
+                    className={`text-xs px-3 py-1.5 rounded-full font-medium ${
+                      allValid
+                        ? 'bg-emerald-100 text-emerald-700'
+                        : 'bg-amber-100 text-amber-700'
+                    }`}
+                  >
+                    {allValid
+                      ? '✓ 基础检查通过'
+                      : '⚠ 需要检查'}
+                  </span>
+
+                  <button
+                    type="button"
+                    onClick={() =>
+                      copyToClipboard(
+                        getAllContentText(),
+                        'all'
+                      )
+                    }
+                    className="text-xs px-3 py-1.5 bg-slate-100 hover:bg-slate-200 rounded-lg font-medium"
+                  >
+                    {copiedSection ===
+                    'all'
+                      ? '✓ 已复制'
+                      : '一键复制全部'}
+                  </button>
+
+                </div>
+
+              </div>
+
             </div>
 
-            {/* 1. 商品标题 */}
+            {/* ========================= */}
+            {/* 标题 */}
+            {/* ========================= */}
+
             {title && (
-              <div className="bg-white rounded-xl border border-slate-200 p-5 shadow-sm space-y-3">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center space-x-2">
-                    <h3 className="font-semibold text-slate-800 text-sm">【商品标题】</h3>
-                    <span className={`text-xs px-2 py-0.5 rounded font-mono ${title.length <= 200 ? 'bg-emerald-100 text-emerald-800' : 'bg-rose-100 text-rose-800'}`}>
-                      {title.length} / 200 字符
+              <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-5">
+
+                <div className="flex items-center justify-between gap-3 mb-3">
+
+                  <div className="flex items-center gap-2">
+
+                    <h3 className="font-semibold text-slate-900">
+                      【商品标题】
+                    </h3>
+
+                    <span
+                      className={`text-xs px-2.5 py-1 rounded-full font-mono ${titleStatus.className}`}
+                    >
+                      {titleStatus.text}
                     </span>
+
                   </div>
+
                   <button
                     type="button"
-                    onClick={() => copyToClipboard(title, 'title')}
-                    className="text-xs text-blue-600 hover:text-blue-800 font-medium"
+                    onClick={() =>
+                      copyToClipboard(
+                        title,
+                        'title'
+                      )
+                    }
+                    className="text-xs text-blue-600 font-medium"
                   >
-                    {copiedSection === 'title' ? '✓ 已复制' : '复制标题'}
+                    {copiedSection ===
+                    'title'
+                      ? '✓ 已复制'
+                      : '复制标题'}
                   </button>
+
                 </div>
-                <p className="text-sm text-slate-700 bg-slate-50 p-3 rounded-lg border border-slate-100 leading-relaxed font-sans select-all">
+
+                <div className="bg-slate-50 border border-slate-200 rounded-xl p-4 text-sm leading-7 select-all">
                   {title}
-                </p>
+                </div>
+
               </div>
             )}
 
-            {/* 2. 商品亮点 */}
+            {/* ========================= */}
+            {/* 核心亮点 */}
+            {/* ========================= */}
+
             {highlights.length > 0 && (
-              <div className="bg-white rounded-xl border border-slate-200 p-5 shadow-sm space-y-3">
-                <div className="flex items-center justify-between">
-                  <h3 className="font-semibold text-slate-800 text-sm">【核心亮点】</h3>
+              <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-5">
+
+                <div className="flex items-center justify-between mb-3">
+
+                  <h3 className="font-semibold text-slate-900">
+                    【核心亮点】
+                  </h3>
+
                   <button
                     type="button"
-                    onClick={() => copyToClipboard(highlights.join('\n'), 'highlights')}
-                    className="text-xs text-blue-600 hover:text-blue-800 font-medium"
+                    onClick={() =>
+                      copyToClipboard(
+                        highlights.join('\n'),
+                        'highlights'
+                      )
+                    }
+                    className="text-xs text-blue-600 font-medium"
                   >
-                    {copiedSection === 'highlights' ? '✓ 已复制' : '复制亮点'}
+                    {copiedSection ===
+                    'highlights'
+                      ? '✓ 已复制'
+                      : '复制亮点'}
                   </button>
+
                 </div>
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
-                  {highlights.map((hl: string, i: number) => (
-                    <div key={i} className="text-xs text-slate-700 bg-blue-50 border border-blue-100 p-2.5 rounded-lg">
-                      {hl}
-                    </div>
-                  ))}
+
+                <div className="space-y-2">
+
+                  {highlights.map(
+                    (highlight, index) => (
+                      <div
+                        key={index}
+                        className="bg-blue-50 border border-blue-100 rounded-xl px-4 py-3 text-sm"
+                      >
+                        {highlight}
+                      </div>
+                    )
+                  )}
+
                 </div>
+
               </div>
             )}
 
-            {/* 3. 五点描述与合规校验 */}
+            {/* ========================= */}
+            {/* 五点 */}
+            {/* ========================= */}
+
             {bullets.length > 0 && (
-              <div className="bg-white rounded-xl border border-slate-200 p-5 shadow-sm space-y-4">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center space-x-2">
-                    <h3 className="font-semibold text-slate-800 text-sm">【五点描述 Bullet Points】</h3>
+              <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-5">
+
+                <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-4">
+
+                  <div className="flex items-center gap-2 flex-wrap">
+
+                    <h3 className="font-semibold text-slate-900">
+                      【五点描述 Bullet Points】
+                    </h3>
+
                     {bulletValidation && (
-                      <span className={`text-xs px-2 py-0.5 rounded font-mono ${bulletValidation.totalCharCount <= 1000 ? 'bg-emerald-100 text-emerald-800' : 'bg-amber-100 text-amber-800'}`}>
-                        总计 {bulletValidation.totalCharCount} / 1000 字符
+                      <span
+                        className={`text-xs px-2.5 py-1 rounded-full font-mono ${
+                          bulletValidation.totalCharCount <=
+                          1000
+                            ? 'bg-emerald-100 text-emerald-700'
+                            : 'bg-rose-100 text-rose-700'
+                        }`}
+                      >
+                        总计{' '}
+                        {
+                          bulletValidation.totalCharCount
+                        }{' '}
+                        / 1000 字符
                       </span>
                     )}
+
                   </div>
+
                   <button
                     type="button"
-                    onClick={() => copyToClipboard(bullets.map((b: string, i: number) => `${i + 1}. ${b}`).join('\n'), 'bullets')}
-                    className="text-xs text-blue-600 hover:text-blue-800 font-medium"
+                    onClick={() =>
+                      copyToClipboard(
+                        bullets
+                          .map(
+                            (bullet, index) =>
+                              `${index + 1}. ${bullet}`
+                          )
+                          .join('\n'),
+                        'bullets'
+                      )
+                    }
+                    className="text-xs text-blue-600 font-medium"
                   >
-                    {copiedSection === 'bullets' ? '✓ 已复制' : '复制五点'}
+                    {copiedSection ===
+                    'bullets'
+                      ? '✓ 已复制'
+                      : '复制五点'}
                   </button>
+
                 </div>
+
+                {/* 五点数量 */}
+
+                {bullets.length !== 5 && (
+                  <div className="mb-4 p-3 bg-amber-50 border border-amber-200 rounded-xl text-sm text-amber-700">
+                    当前生成了{' '}
+                    {bullets.length}
+                    条，建议保持 5 条。
+                  </div>
+                )}
 
                 <div className="space-y-3">
-                  {bullets.map((bullet: string, index: number) => {
-                    const val = bulletValidation?.results[index];
-                    return (
-                      <div key={index} className="p-3.5 bg-slate-50 rounded-lg border border-slate-200 space-y-2">
-                        <div className="flex items-center justify-between text-xs text-slate-500">
-                          <span className="font-medium text-slate-700">Point {index + 1}</span>
-                          <span className="font-mono">{bullet.length} 字符</span>
+
+                  {bullets.map(
+                    (bullet, index) => {
+
+                      const validation =
+                        bulletValidation
+                          ?.results[index];
+
+                      return (
+                        <div
+                          key={index}
+                          className={`rounded-xl border p-4 ${
+                            validation?.isValid
+                              ? 'bg-slate-50 border-slate-200'
+                              : 'bg-rose-50 border-rose-200'
+                          }`}
+                        >
+
+                          <div className="flex items-center justify-between mb-2">
+
+                            <span className="font-semibold text-sm text-slate-700">
+                              Point {index + 1}
+                            </span>
+
+                            <span className="text-xs font-mono text-slate-500">
+                              {bullet.length}{' '}
+                              字符
+                            </span>
+
+                          </div>
+
+                          <div className="text-sm leading-7 select-all">
+                            {bullet}
+                          </div>
+
+                          {validation &&
+                            validation.errors
+                              .length >
+                              0 && (
+
+                              <div className="mt-3 space-y-1">
+
+                                {validation.errors.map(
+                                  (
+                                    warning,
+                                    errorIndex
+                                  ) => (
+                                    <div
+                                      key={
+                                        errorIndex
+                                      }
+                                      className="text-xs text-rose-700"
+                                    >
+                                      ❌{' '}
+                                      {warning}
+                                    </div>
+                                  )
+                                )}
+
+                              </div>
+                            )}
+
+                          {validation &&
+                            validation.warnings
+                              .length >
+                              0 && (
+
+                              <div className="mt-2 space-y-1">
+
+                                {validation.warnings.map(
+                                  (
+                                    warning,
+                                    warningIndex
+                                  ) => (
+                                    <div
+                                      key={
+                                        warningIndex
+                                      }
+                                      className="text-xs text-amber-700"
+                                    >
+                                      ⚠️{' '}
+                                      {warning}
+                                    </div>
+                                  )
+                                )}
+
+                              </div>
+                            )}
+
                         </div>
-                        <p className="text-sm text-slate-800 leading-relaxed select-all">{bullet}</p>
+                      );
+                    }
+                  )}
 
-                        {val && val.errors.length > 0 && (
-                          <div className="space-y-1">
-                            {val.errors.map((err: string, ei: number) => (
-                              <div key={ei} className="text-xs text-rose-700 bg-rose-50 px-2 py-1 rounded border border-rose-200">
-                                ❌ {err}
-                              </div>
-                            ))}
-                          </div>
-                        )}
-
-                        {val && val.warnings.length > 0 && (
-                          <div className="space-y-1">
-                            {val.warnings.map((warn: string, wi: number) => (
-                              <div key={wi} className="text-xs text-amber-700 bg-amber-50 px-2 py-1 rounded border border-amber-200">
-                                ⚠️ {warn}
-                              </div>
-                            ))}
-                          </div>
-                        )}
-                      </div>
-                    );
-                  })}
                 </div>
+
+                {/* 总体警告 */}
+
+                {bulletValidation &&
+                  bulletValidation
+                    .generalWarnings.length >
+                    0 && (
+
+                    <div className="mt-4 p-3 bg-amber-50 border border-amber-200 rounded-xl">
+
+                      {bulletValidation.generalWarnings.map(
+                        (
+                          warning,
+                          index
+                        ) => (
+                          <div
+                            key={index}
+                            className="text-xs text-amber-700"
+                          >
+                            ⚠️ {warning}
+                          </div>
+                        )
+                      )}
+
+                    </div>
+                  )}
+
               </div>
             )}
 
-            {/* 4. Search Terms 后台搜索词 */}
+            {/* ========================= */}
+            {/* Search Terms */}
+            {/* ========================= */}
+
             {searchTerms && (
-              <div className="bg-white rounded-xl border border-slate-200 p-5 shadow-sm space-y-3">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center space-x-2">
-                    <h3 className="font-semibold text-slate-800 text-sm">【后台 Search Terms】</h3>
-                    <span className={`text-xs px-2 py-0.5 rounded font-mono font-medium ${!isStOverLimit ? 'bg-emerald-100 text-emerald-800' : 'bg-rose-100 text-rose-800'}`}>
-                      {stByteLength} / 249 字节 (Bytes) {!isStOverLimit ? '✓ 合规' : '❌ 超限'}
+              <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-5">
+
+                <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-4">
+
+                  <div className="flex items-center gap-2 flex-wrap">
+
+                    <h3 className="font-semibold text-slate-900">
+                      【后台 Search Terms】
+                    </h3>
+
+                    <span
+                      className={`text-xs px-2.5 py-1 rounded-full font-mono ${searchStatus.className}`}
+                    >
+                      {searchStatus.text}
                     </span>
+
                   </div>
+
                   <button
                     type="button"
-                    onClick={() => copyToClipboard(searchTerms, 'st')}
-                    className="text-xs text-blue-600 hover:text-blue-800 font-medium"
+                    onClick={() =>
+                      copyToClipboard(
+                        searchTerms,
+                        'search'
+                      )
+                    }
+                    className="text-xs text-blue-600 font-medium"
                   >
-                    {copiedSection === 'st' ? '✓ 已复制' : '复制搜索词'}
+                    {copiedSection ===
+                    'search'
+                      ? '✓ 已复制'
+                      : '复制搜索词'}
                   </button>
+
                 </div>
-                <p className="text-sm text-slate-700 bg-slate-50 p-3 rounded-lg border border-slate-100 leading-relaxed font-mono select-all break-all">
+
+                <div
+                  className={`rounded-xl p-4 text-sm font-mono leading-7 break-words border ${
+                    searchBytes > 249
+                      ? 'bg-rose-50 border-rose-200'
+                      : 'bg-slate-50 border-slate-200'
+                  }`}
+                >
                   {searchTerms}
-                </p>
-                <p className="text-xs text-slate-400">
-                  💡 提示：亚马逊后台直接粘贴即可，无需标点，系统已自动按空格分隔高频同义词。
-                </p>
+                </div>
+
+                <div className="mt-3 text-xs text-slate-400">
+                  系统会在服务端自动去重、清理标点，并控制在 249 Bytes 安全线以内。
+                </div>
+
               </div>
             )}
+
           </div>
         )}
+
       </div>
     </div>
   );
