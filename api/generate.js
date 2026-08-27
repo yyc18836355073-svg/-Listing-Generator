@@ -99,7 +99,7 @@ ${(currentListing.bullets || []).join('\n')}
      } else {
   // 默认常规生成模式
   userPrompt = `【目标平台】：${platform} 
-（🚨强制指令：除标题和Search Terms保留中文对照外，所有生成的营销正文必须且只能使用【${platform}】对应的本土化纯正外语输出！严禁出现中式外语或混用中文！）
+⁠（🚨最高铁律：从【商品标题】、【核心亮点】到【五点描述】，必须 100% 全部使用【${platform}】对应的本土化纯正外语输出！严禁在结果中出现任何中文字符！）
 【商品名称】：${productName}
 【核心卖点/参数】：${sellingPoints}`;
 }
