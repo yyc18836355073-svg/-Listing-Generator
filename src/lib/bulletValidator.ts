@@ -26,6 +26,7 @@ export const BANNED_RULES: BannedWordRule[] = [
 
   // 2. 医疗与疗效宣称（Medical Claims - FDA 监管红线）
   { pattern: /\b(fda approved|fda certified)\b/i, word: 'FDA approved', category: 'medical', reason: '严禁擅自使用 FDA 认证标识或宣称' },
+  { pattern: /经\s*F\s*D\s*A\s*认证|F\s*D\s*A\s*認証/i, word: '经 FDA 认证', category: 'medical', reason: '中文 FDA 认证宣称同属医疗监管' },
   { pattern: /\b(cure(s|d)?|healing)\b/i, word: 'cure', category: 'medical', reason: '治疗宣称属于医疗药物管控' },
   { pattern: /\b(treat(s|ment)? disease|prevent(s|ing)? disease)\b/i, word: 'treat disease', category: 'medical', reason: '防病/治病宣称属于医疗违规' },
   { pattern: /\b(relieve(s)? pain|pain relief)\b/i, word: 'pain relief', category: 'medical', reason: '止痛宣称需医疗器械合规资质' },
@@ -45,6 +46,8 @@ export const BANNED_RULES: BannedWordRule[] = [
   { pattern: /\b(thermos)\b/i, word: 'Thermos', category: 'trademark', reason: 'Thermos 为膳魔师注册商标，建议改为 insulated flask' },
   { pattern: /\b(gore[- ]?tex)\b/i, word: 'Gore-Tex', category: 'trademark', reason: 'Gore-Tex 为注册商标，建议改为 waterproof breathable fabric' },
   { pattern: /\b(band[- ]?aid)\b/i, word: 'Band-Aid', category: 'trademark', reason: 'Band-Aid 为强生注册商标，建议改为 adhesive bandage' },
+  { pattern: /\b(apple)\b/i, word: 'Apple', category: 'trademark', reason: 'Apple 为注册商标，描述中需避免侵权' },
+  { pattern: /\b(sony)\b/i, word: 'Sony', category: 'trademark', reason: 'Sony 为注册商标，描述中需避免侵权' },
 
   // 5. 环保与材质宣称（Environmental）
   { pattern: /\b(eco[- ]?friendly|environmentally friendly)\b/i, word: 'eco-friendly', category: 'environmental', reason: '亚马逊 2024 新规要求环保宣称必须提供对应认证' },
@@ -92,12 +95,12 @@ export function validateSingleBullet(text: string, index: number): BulletValidat
 
   if (charCount === 0) {
     errors.push('五点描述不能为空');
-  } else if (charCount < 50) {
-    warnings.push(`描述过短（当前 ${charCount} 字符），建议在 150~250 字符之间`);
-  } else if (charCount > 500) {
-    errors.push(`字符数超限（当前 ${charCount} 字符），单条五点上限为 500 字符`);
-  } else if (charCount > 250) {
-    warnings.push(`字符数偏长（当前 ${charCount} 字符），亚马逊官方推荐 150~250 字符以内`);
+  } else if (charCount < 10) {
+    errors.push(`过短（当前 ${charCount} 字符），单条下限10字符`);
+  } else if (charCount > 255) {
+    errors.push(`字符数超限（当前 ${charCount} 字符），单条上限255字符`);
+  } else if (charCount > 200) {
+    warnings.push(`字符数偏长（当前 ${charCount} 字符），推荐200以内`);
   }
 
   const bannedViolations = checkBannedWords(trimmed);

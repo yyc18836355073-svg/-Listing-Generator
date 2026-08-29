@@ -1,6 +1,8 @@
 import React, { useState } from 'react';
 import { validateAllBullets } from './lib/bulletValidator';
 import type { BulletValidationResult } from './lib/bulletValidator';
+import { validateTitle, validateHighlights, validateTitleForPlatform } from './lib/titleValidator';
+import { validateFacts } from './lib/factValidator';
 
 // 计算 UTF-8 字节长度（亚马逊 Search Terms 严格以字节计算）
 function getByteLength(str: string): number {
@@ -24,12 +26,12 @@ function getMatchedGroup(str: string, regex: RegExp): string {
 function parseBulletPoints(rawBulletsText: string): string[] {
   if (!rawBulletsText) return [];
   const segments: string[] = rawBulletsText
-        .split(/(?:^|\n)\s*[:：]?\s*(?:\d+[\.、\)]|Point\s*\d+[:\.]?|【\d+】)\s*/i)
-    .map((s: string) => s.trim())
+        .split(/(?:^|\n)\s*[:：]?\s*(?:\d+[\.、\)]?\s*|Point\s*\d+[:\.]?|【\d+】)\s*/i)
+    .map((s: string) => s.trim().replace(/^[:：\s]+/, "").trim())
     .filter((s: string) => Boolean(s));
 
   return segments.slice(0, 5).map((item: string) => {
-    return item.replace(/\n+/g, ' ').replace(/\s+/g, ' ').trim();
+    return item.replace(/\n+/g, ' ').replace(/\s+/g, ' ').replace(/^[:：\s\d\.、\)]+/, "").trim();
   });
 }
 
@@ -47,14 +49,20 @@ function cleanSearchTerms(rawSt: string, titleText: string): string {
 
   const words: string[] = cleaned.toLowerCase().split(/\s+/).filter(Boolean);
   const titleWords: Set<string> = new Set(titleText.toLowerCase().split(/\s+/).filter(Boolean));
+  const genericPlatformWords = new Set(["amazon","us","uk","de","jp","temu","tiktok","shop","store","search","terms","term"]);
   
   const uniqueWords: string[] = [];
   const seen: Set<string> = new Set();
   for (const w of words) {
-    if (!seen.has(w) && !titleWords.has(w) && w.length > 1) {
+    if (!seen.has(w) && !titleWords.has(w) && w.length > 2 && !genericPlatformWords.has(w)) {
       seen.add(w);
       uniqueWords.push(w);
     }
+  }
+
+  if (uniqueWords.length === 0) {
+    const hasOnlyGeneric = words.length > 0 && words.every(w => genericPlatformWords.has(w) || titleWords.has(w) || w.length <= 2);
+    if (hasOnlyGeneric) return '';
   }
 
   let result: string = '';
@@ -67,7 +75,7 @@ function cleanSearchTerms(rawSt: string, titleText: string): string {
     }
   }
 
-  return result || cleaned;
+  return result || "";
 }
 
 export function App() {
@@ -255,10 +263,18 @@ export function App() {
   
   const stByteLength: number = getByteLength(searchTerms);
   const isStOverLimit: boolean = currentLimit.st > 0 ? stByteLength > currentLimit.st : false;
+  const titleValid = title ? validateTitleForPlatform(title, platform).valid : false;
+  const highlightsValid = highlights.length === 0 || highlights.every(h => validateHighlights(h).valid);
+  const factText = `${title}\n${highlights.join('\n')}\n${bullets.join('\n')}`;
+  const factsForCheck = [...sellingPoints.split(/[、,\n]/).map(s=>s.trim()).filter(Boolean), productName].filter(Boolean);
+  const factValid = !title || validateFacts(factText, factsForCheck).length === 0;
   
     const isOverallCompliant: boolean = Boolean(
     title &&
     title.length <= currentLimit.title &&
+    titleValid &&
+    highlightsValid &&
+    factValid &&
     bullets.length <= currentLimit.maxBullets &&
     bulletValidation?.isAllValid &&
     (bulletValidation?.totalCharCount ?? 0) <= currentLimit.bulletsTotal &&
