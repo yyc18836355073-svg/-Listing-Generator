@@ -457,7 +457,7 @@ export function App() {
                   <div className="flex items-center space-x-2">
                     <h3 className="font-semibold text-slate-800 text-sm">【五点描述 Bullet Points】</h3>
                     {bulletValidation && (
-                      <span className={`text-xs px-2 py-0.5 rounded font-mono ${bulletValidation.totalCharCount <= 1000 ? 'bg-emerald-100 text-emerald-800' : 'bg-amber-100 text-amber-800'}`}>
+                      <span className={`text-xs px-2 py-0.5 rounded font-mono ${bulletValidation.totalCharCount <= currentLimit.bulletsTotal ? 'bg-emerald-100 text-emerald-800' : 'bg-amber-100 text-amber-800'}`}>
                         共 {bullets.length} 条 · 总计 {bulletValidation.totalCharCount} /{currentLimit.bulletsTotal}字符
 
                       </span>
@@ -515,7 +515,7 @@ export function App() {
             )}
 
             {/* 4. Search Terms 后台搜索词 */}
-             ⁠{searchTerms && currentLimit.st > 0 && (
+             {searchTerms && currentLimit.st > 0 && (
               <div className="bg-white rounded-xl border border-slate-200 p-5 shadow-sm space-y-3">
                 <div className="flex items-center justify-between">
                   <div className="flex items-center space-x-2">
