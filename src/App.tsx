@@ -384,13 +384,6 @@ export function App() {
                 >
                   {copiedSection === 'all' ? '✓ 已复制全部内容' : '📋 一键复制全部'}
                 </button>
-                <button
-  onClick={handleAutoFix}
-  disabled={fixing}
-  className="ml-3 px-4 py-2 bg-amber-500 text-white text-sm font-medium rounded hover:bg-amber-600 disabled:opacity-50 transition-colors"
->
-  {fixing ? '✨ AI 紧急修复中...' : '🛠️ 一键合规重写'}
-              </button>
               </div>
             </div>
 
