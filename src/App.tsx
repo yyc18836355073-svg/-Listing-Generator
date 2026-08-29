@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { validateAllBullets } from './lib/bulletValidator';
 import type { BulletValidationResult } from './lib/bulletValidator';
-import { validateTitle, validateHighlights, validateTitleForPlatform } from './lib/titleValidator';
+import { validateHighlights, validateTitleForPlatform } from './lib/titleValidator';
 import { validateFacts } from './lib/factValidator';
 
 // 计算 UTF-8 字节长度（亚马逊 Search Terms 严格以字节计算）
