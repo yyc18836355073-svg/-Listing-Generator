@@ -174,14 +174,12 @@ export function App() {
       
       const fixedData = await response.json();
 
-      // 4. 用后端洗白后的合规数据，强行覆盖页面的旧状态
-      if (fixedData.title) setTitle(fixedData.title);
-      if (fixedData.highlights) setHighlights(fixedData.highlights);
-      if (fixedData.bullets) setBullets(fixedData.bullets);
-      if (fixedData.searchTerms) setSearchTerms(fixedData.searchTerms);
-
-      // 5. 修复成功后，强行清空页面的飘红报警状态
-      setBulletValidation(null); 
+            // 4. 正确解析后端返回的修复文本，复用已有的解析引擎，它会自动重新触发校验！
+      if (fixedData.result) {
+        parseAIResult(fixedData.result);
+      } else {
+        throw new Error('修复返回数据异常');
+      }
 
     } catch (err: any) {
       console.error("修复失败:", err);
