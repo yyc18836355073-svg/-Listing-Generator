@@ -239,14 +239,26 @@ export function App() {
     }
   };
 
+    // 定义不同平台的动态校验阈值
+  const PLATFORM_LIMITS: Record<string, { title: number; bulletsTotal: number; st: number; maxBullets: number }> = {
+    'amazon-us': { title: 75, bulletsTotal: 1000, st: 249, maxBullets: 5 },
+    'amazon-de': { title: 75, bulletsTotal: 1000, st: 249, maxBullets: 5 },
+    'amazon-uk': { title: 75, bulletsTotal: 1000, st: 249, maxBullets: 5 },
+    'amazon-jp': { title: 75, bulletsTotal: 1000, st: 249, maxBullets: 5 },
+    'temu': { title: 100, bulletsTotal: 500, st: 0, maxBullets: 5 },
+    'tiktok-shop': { title: 80, bulletsTotal: 500, st: 0, maxBullets: 4 },
+  };
+
+  const currentLimit = PLATFORM_LIMITS[platform] || PLATFORM_LIMITS['amazon-us'];
+  
   const stByteLength: number = getByteLength(searchTerms);
-  const isStOverLimit: boolean = stByteLength > 249;
+  const isStOverLimit: boolean = currentLimit.st > 0 ? stByteLength > currentLimit.st : false;
+  
   const isOverallCompliant: boolean = Boolean(
     title &&
-    title.length <= 200 &&
-    bullets.length === 5 &&
-    bulletValidation?.isAllValid &&
-    (bulletValidation?.totalCharCount ?? 0) <= 1000 &&
+    title.length <= currentLimit.title &&
+    bullets.length <= currentLimit.maxBullets &&
+    (bulletValidation?.totalCharCount ?? 0) <= currentLimit.bulletsTotal &&
     !isStOverLimit
   );
 
@@ -393,14 +405,9 @@ export function App() {
                 <div className="flex items-center justify-between">
                   <div className="flex items-center space-x-2">
                     <h3 className="font-semibold text-slate-800 text-sm">【商品标题】</h3>
-                    <span className={`text-xs px-2 py-0.5 rounded font-mono ${title.length <= 200 ? 'bg-emerald-100 text-emerald-800' : 'bg-rose-100 text-rose-800'}`}>
-                      {title.length} / 200 字符
+                    <span className={`text-xs px-2 py-0.5 rounded font-mono ${title.length <= currentLimit.title ? 'bg-emerald-100 text-emerald-800' : 'bg-rose-100 text-rose-800'}`}>
+                      {title.length} / {currentLimit.title} 字符
                     </span>
-                    {title.length > 75 && (
-                      <span className="text-xs text-slate-400 hidden sm:inline">
-                        (前 75 字符将在移动端首屏展示)
-                      </span>
-                    )}
                   </div>
                   <button
                     type="button"
@@ -451,7 +458,8 @@ export function App() {
                     <h3 className="font-semibold text-slate-800 text-sm">【五点描述 Bullet Points】</h3>
                     {bulletValidation && (
                       <span className={`text-xs px-2 py-0.5 rounded font-mono ${bulletValidation.totalCharCount <= 1000 ? 'bg-emerald-100 text-emerald-800' : 'bg-amber-100 text-amber-800'}`}>
-                        共 {bullets.length} 条 · 总计 {bulletValidation.totalCharCount} / 1000 字符
+                        共 {bullets.length} 条 · 总计 {bulletValidation.totalCharCount} /{currentLimit.bulletsTotal}字符
+
                       </span>
                     )}
                   </div>
@@ -507,13 +515,13 @@ export function App() {
             )}
 
             {/* 4. Search Terms 后台搜索词 */}
-            {searchTerms && (
+             ⁠{searchTerms && currentLimit.st > 0 && (
               <div className="bg-white rounded-xl border border-slate-200 p-5 shadow-sm space-y-3">
                 <div className="flex items-center justify-between">
                   <div className="flex items-center space-x-2">
                     <h3 className="font-semibold text-slate-800 text-sm">【后台 Search Terms】</h3>
                     <span className={`text-xs px-2 py-0.5 rounded font-mono font-medium ${!isStOverLimit ? 'bg-emerald-100 text-emerald-800' : 'bg-rose-100 text-rose-800'}`}>
-                      {stByteLength} / 249 字节 (Bytes) {!isStOverLimit ? '✓ 合规' : '❌ 超限'}
+                      {stByteLength} / {currentLimit.st}字节 (Bytes) {!isStOverLimit ? '✓ 合规' : '❌ 超限'}
                     </span>
                   </div>
                   <button
