@@ -252,10 +252,11 @@ export function App() {
   const stByteLength: number = getByteLength(searchTerms);
   const isStOverLimit: boolean = currentLimit.st > 0 ? stByteLength > currentLimit.st : false;
   
-  const isOverallCompliant: boolean = Boolean(
+    const isOverallCompliant: boolean = Boolean(
     title &&
     title.length <= currentLimit.title &&
     bullets.length <= currentLimit.maxBullets &&
+    bulletValidation?.isAllValid &&
     (bulletValidation?.totalCharCount ?? 0) <= currentLimit.bulletsTotal &&
     !isStOverLimit
   );
