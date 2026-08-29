@@ -7,11 +7,39 @@ export const config = {
   runtime: 'edge',
 };
 
+const ALLOWED_ORIGINS = [
+  "https://listing-generator-seven.vercel.app",
+  "https://listing-generator-seven-git-main-yyc18836355073.vercel.app",
+  "http://localhost:5173",
+  "http://localhost:3000",
+];
+const RATE_LIMIT_WINDOW = 60 * 1000;
+const RATE_LIMIT_MAX = 10;
+const ipMap = new Map();
+function isAllowedOrigin(origin) {
+  if (!origin) return true;
+  return ALLOWED_ORIGINS.some(o => origin === o || origin.endsWith(".vercel.app"));
+}
+function checkRateLimit(ip) {
+  const now = Date.now();
+  const arr = ipMap.get(ip) || [];
+  const recent = arr.filter(t => now - t < RATE_LIMIT_WINDOW);
+  if (recent.length >= RATE_LIMIT_MAX) return false;
+  recent.push(now);
+  ipMap.set(ip, recent);
+  return true;
+}
+
 export default async function handler(req) {
+  const origin = req.headers.get("origin") || "";
+  if (origin && !isAllowedOrigin(origin)) {
+    return new Response(JSON.stringify({ error: "Forbidden origin" }), { status: 403, headers: { "Content-Type": "application/json" } });
+  }
   const corsHeaders = {
-    'Access-Control-Allow-Origin': '*',
+    'Access-Control-Allow-Origin': isAllowedOrigin(origin) && origin ? origin : "https://listing-generator-seven.vercel.app",
     'Access-Control-Allow-Methods': 'POST, OPTIONS',
     'Access-Control-Allow-Headers': 'Content-Type, Authorization',
+    'Vary': 'Origin',
   };
 
   if (req.method === 'OPTIONS') {
@@ -25,6 +53,11 @@ export default async function handler(req) {
     });
   }
 
+  const clientIp = req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() || req.headers.get("x-real-ip") || "unknown";
+  if (!checkRateLimit(clientIp)) {
+    return new Response(JSON.stringify({ error: "Too many requests, please try again in a minute" }), { status: 429, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+  }
+
   try {
     const {
       productName = '',
@@ -34,6 +67,13 @@ export default async function handler(req) {
       currentListing = null,
       violations = [],
     } = await req.json();
+
+    if (productName.length > 80 || sellingPoints.length > 1000) {
+      return new Response(JSON.stringify({ error: "Input too long: productName <=80, sellingPoints <=1000" }), { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+    }
+    const sanitize = (s) => (s || "").toString().replace(/<\/?Product_Facts>/gi, "").replace(/<\/?product_facts>/gi, "");
+    const safeProductName = sanitize(productName).slice(0, 80);
+    const safeSellingPoints = sanitize(sellingPoints).slice(0, 1000);
 
     const apiKey = process.env.SILICONFLOW_API_KEY;
     if (!apiKey) {
@@ -97,18 +137,25 @@ ${platformRule}
     let userPrompt = '';
 
     if (action === 'autoFix' && currentListing) {
+      const safeCurrent = {
+        title: sanitize(currentListing.title || "").slice(0, 80),
+        highlights: (currentListing.highlights || []).map(h => sanitize(h).slice(0, 125)),
+        bullets: (currentListing.bullets || []).map(b => sanitize(b).slice(0, 500)),
+        searchTerms: sanitize(currentListing.searchTerms || "").slice(0, 249),
+      };
+      const safeViolations = (violations || []).map(v => sanitize(v).slice(0, 200));
       userPrompt = `【智能合规修复任务】：
 当前生成的 Listing 存在违规或不符合 ${platform} 平台规则的地方，请进行针对性重写与修复。
 
 【待修复问题列表】：
-${violations.length > 0 ? violations.map((v, i) => `${i + 1}. ${v}`).join('\n') : '请全面检查并优化字数与违规词汇'}
+${safeViolations.length > 0 ? safeViolations.map((v, i) => `${i + 1}. ${v}`).join('\n') : '请全面检查并优化字数与违规词汇'}
 
 【当前 Listing 内容】：
-【当前标题】：${currentListing.title || ''}
-【当前亮点】：${(currentListing.highlights || []).join(' | ')}
+【当前标题】：${safeCurrent.title}
+【当前亮点】：${safeCurrent.highlights.join(' | ')}
 【当前五点】：
-${(currentListing.bullets || []).join('\n')}
-【当前搜索词】：${currentListing.searchTerms || ''}
+${safeCurrent.bullets.join('\n')}
+【当前搜索词】：${safeCurrent.searchTerms}
 
 【修复执行要求】：
 1. 将所有违规词替换为合规的中性描述。
@@ -117,8 +164,8 @@ ${(currentListing.bullets || []).join('\n')}
     } else {
       userPrompt = `【目标平台】：${platform} 
 （🚨最高铁律：必须 100% 全部使用【${platform}】对应的本土化外语输出！严禁在结果中出现任何中文字符！）
-【商品名称】：${productName}
-【核心卖点/参数】：${sellingPoints}`;
+【商品名称】：${safeProductName}
+【核心卖点/参数】：${safeSellingPoints}`;
     }
 
     const response = await fetch('https://api.siliconflow.cn/v1/chat/completions', {
@@ -128,20 +175,21 @@ ${(currentListing.bullets || []).join('\n')}
         Authorization: `Bearer ${apiKey}`,
       },
       body: JSON.stringify({
-        model: 'Qwen/Qwen2.5-72B-Instruct',
+        model: 'Qwen/Qwen2.5-7B-Instruct',
         messages: [
           { role: 'system', content: systemPrompt },
           { role: 'user', content: userPrompt },
         ],
         temperature: 0.5,
-        max_tokens: 2048,
+        max_tokens: 1500,
       }),
     });
 
     if (!response.ok) {
       const errText = await response.text();
-      return new Response(JSON.stringify({ error: `API 调用失败: ${response.status}`, details: errText }), {
-        status: response.status,
+      console.error("[generate] SiliconFlow error", response.status, errText.slice(0,300));
+      return new Response(JSON.stringify({ error: "Upstream model error, please try again" }), {
+        status: 502,
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       });
     }
@@ -154,7 +202,8 @@ ${(currentListing.bullets || []).join('\n')}
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
     });
   } catch (err) {
-    return new Response(JSON.stringify({ error: '服务器内部错误', message: err.message }), {
+    console.error("[generate] error", err);
+    return new Response(JSON.stringify({ error: '服务器内部错误，请稍后重试' }), {
       status: 500,
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
     });
