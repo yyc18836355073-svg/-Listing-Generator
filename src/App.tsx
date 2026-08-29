@@ -24,7 +24,7 @@ function getMatchedGroup(str: string, regex: RegExp): string {
 function parseBulletPoints(rawBulletsText: string): string[] {
   if (!rawBulletsText) return [];
   const segments: string[] = rawBulletsText
-    .split(/(?:^|\n)\s*(?:\d+[\.、\)]|Point\s*\d+[:\.]?|【\d+】)\s*/i)
+        .split(/(?:^|\n)\s*[:：]?\s*(?:\d+[\.、\)]|Point\s*\d+[:\.]?|【\d+】)\s*/i)
     .map((s: string) => s.trim())
     .filter((s: string) => Boolean(s));
 
@@ -155,8 +155,12 @@ export function App() {
         searchTerms: searchTerms
       };
 
-      // 2. 提取当前违规的警告信息（假设存在你第 91 行的 generalWarnings 里）
-      const currentViolations = bulletValidation?.generalWarnings || [];
+      // 2. 提取当前所有违规信息（合并全局警告与每一条五点里的致命红灯 Error）
+      const currentViolations = [
+        ...(bulletValidation?.generalWarnings || []),
+        ...(bulletValidation?.results?.flatMap(r => r.errors) || [])
+      ];
+
 
       // 3. 向你的 Serverless 后端发送抢救请求
       const response = await fetch('/api/generate', { 
