@@ -175,13 +175,13 @@ ${safeCurrent.bullets.join('\n')}
         Authorization: `Bearer ${apiKey}`,
       },
       body: JSON.stringify({
-        model: 'Qwen/Qwen2.5-7B-Instruct',
+        model: 'Qwen/Qwen2.5-72B-Instruct',
         messages: [
           { role: 'system', content: systemPrompt },
           { role: 'user', content: userPrompt },
         ],
         temperature: 0.5,
-        max_tokens: 1500,
+        max_tokens: 2048,
       }),
     });
 
