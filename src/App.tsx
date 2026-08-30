@@ -3,13 +3,49 @@ import { cleanTitleDeterministic, validateHighlights, cleanHighlightsDeterminist
 import { validateFacts } from "./lib/factValidator";
 import { validateBullets, getBulletDisplay } from "./lib/bulletValidator";
 
-type Platform = "amazon-en" | "amazon-de" | "tiktok-en";
+type Platform = "amazon-us" | "amazon-de" | "amazon-uk" | "amazon-jp" | "temu" | "tiktok-shop";
 
 const PLATFORM_OPTIONS: { value: Platform; label: string; hint: string }[] = [
-  { value: "amazon-en", label: "Amazon-英文", hint: "75字符标题+125亮点 2026新规" },
-  { value: "amazon-de", label: "Amazon-德文", hint: "75+125 德语名词大写" },
-  { value: "tiktok-en", label: "TikTok-英文", hint: "80字符 口语化 允许emoji" },
+  { value: "amazon-us", label: "Amazon 美国站", hint: "75+125 2026新规" },
+  { value: "amazon-de", label: "Amazon 德国站", hint: "75+125 德语" },
+  { value: "amazon-uk", label: "Amazon 英国站", hint: "75+125 英式" },
+  { value: "amazon-jp", label: "Amazon 日本站", hint: "75+125 日式" },
+  { value: "temu", label: "Temu", hint: "60-100 核心品名" },
+  { value: "tiktok-shop", label: "TikTok Shop", hint: "40-80 爆款钩子" },
 ];
+
+const PLATFORM_PROMPTS: Record<Platform, string> = {
+  'amazon-us': `【Amazon 美国站规则】:
+- 标题: 严格控制在 75 字符内，首字母大写，包含大词与核心卖点。
+- 亮点: 输出 3 条 Item Highlights，每条 <= 125 字符。
+- 五点描述: 严格输出 5 条，每条 10-255 字符，严禁句末标点及 Emoji。
+- 搜索词: 严禁超过 249 字节，仅用空格分隔，严禁逗号。`,
+  'amazon-de': `【Amazon 德国站规则】:
+- 标题: 严格控制在 75 字符内，德语本土化表达，首字母大写。
+- 亮点: 输出 3 条 Item Highlights，每条 <= 125 字符。
+- 五点描述: 严格输出 5 条，每条 10-255 字符，严禁句末标点及 Emoji。
+- 搜索词: 严禁超过 249 字节，仅用空格分隔，严禁逗号。`,
+  'amazon-uk': `【Amazon 英国站规则】:
+- 标题: 严格控制在 75 字符内，英式英语表达，首字母大写。
+- 亮点: 输出 3 条 Item Highlights，每条 <= 125 字符。
+- 五点描述: 严格输出 5 条，每条 10-255 字符，严禁句末标点及 Emoji。
+- 搜索词: 严禁超过 249 字节，仅用空格分隔，严禁逗号。`,
+  'amazon-jp': `【Amazon 日本站规则】:
+- 标题: 严格控制在 75 字符内，符合日本消费者搜索和阅读习惯。
+- 亮点: 输出 3 条 Item Highlights，每条 <= 125 字符。
+- 五点描述: 严格输出 5 条，每条 10-255 字符，严禁句末标点及 Emoji。
+- 搜索词: 严禁超过 249 字节，仅用空格分隔，严禁逗号。`,
+  'temu': `【Temu 全托管/半托管规则】:
+- 标题: 60-100 字符，格式强制为：[核心品名] + [规格/材质] + [适用场景]。
+- 亮点: 提取 3 条核心材质与规格属性。
+- 五点描述: 3-5 条纯参数化描述（如尺寸、材质、装箱清单），去除所有主观修饰词。
+- 搜索词: 输出 5-10 个核心属性同义词，空格分隔。`,
+  'tiktok-shop': `【TikTok Shop 兴趣电商规则】:
+- 标题: 40-80 字符，强调使用场景、感官冲击与爆款钩子，一秒抓人眼球。
+- 亮点: 提取 3 条最能打动用户的痛点解决方案。
+- 五点描述: 3-4 条极简短句，突出高颜值、痛点解决与开箱即用体验。
+- 搜索词: 提取 5-8 个高频 Trending 标签词（如 #hashtag）。`,
+};
 
 type ListingResult = {
   title: string;
@@ -82,11 +118,13 @@ function parseListingContent(content: string): ListingResult {
 }
 
 export default function App() {
+  const [apiKey, setApiKey] = useState<string>(localStorage.getItem('siliconflow_key') || '');
   const [productName, setProductName] = useState("");
   const [sellingPoints, setSellingPoints] = useState("");
-  const [platform, setPlatform] = useState<Platform>("amazon-en");
+  const [platform, setPlatform] = useState<Platform>("amazon-us");
   const [result, setResult] = useState<ListingResult | null>(null);
   const [isGenerating, setIsGenerating] = useState(false);
+  const [isFixing, setIsFixing] = useState(false);
   const [copied, setCopied] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [hallucinationAlerts, setHallucinationAlerts] = useState<Array<{ type: string; value: string }>>([]);
@@ -94,6 +132,10 @@ export default function App() {
   const canGenerate = productName.trim().length > 0 && sellingPoints.trim().length > 0;
 
   const handleGenerate = async () => {
+    if (!apiKey || apiKey.trim() === "") {
+      setError("请先配置 API Key");
+      return;
+    }
     if (!canGenerate || isGenerating) return;
     setIsGenerating(true);
     setCopied(false);
@@ -101,39 +143,26 @@ export default function App() {
     setResult(null);
     setHallucinationAlerts([]);
 
-    const apiKey = import.meta.env.VITE_SILICONFLOW_API_KEY as string | undefined;
-    const platformLabel = PLATFORM_OPTIONS.find((o) => o.value === platform)?.label || platform;
-    if (!apiKey || apiKey.trim() === "" || apiKey.includes("请在此")) {
-      setError("未配置 API 密钥：请在项目根目录创建 .env 并设置 VITE_SILICONFLOW_API_KEY");
-      setIsGenerating(false);
-      return;
-    }
-
-    const langMap: Record<Platform, string> = {
-      "amazon-en": "英文（Amazon.com）",
-      "amazon-de": "德文（Amazon.de）",
-      "tiktok-en": "英文（TikTok Shop）",
-    };
-
     const normalizedPoints = sellingPoints.trim().replace(/[\/／]/g, "、").replace(/[,，]/g, "、");
     const originalFacts = normalizedPoints.split(/[、\n]+/).map((s) => s.trim()).filter(Boolean);
     if (productName.trim()) originalFacts.unshift(productName.trim());
 
-    const systemPrompt = `You are a senior cross-border e-commerce listing specialist for ${platformLabel}. Your task is to write a listing based on Product Facts.
+    const platformRule = PLATFORM_PROMPTS[platform] || PLATFORM_PROMPTS["amazon-us"];
+    const systemPrompt = `你是一名精通多平台出海运营的资深 Listing 专家。当前目标平台为：${platform}。
+你的任务是生成或修复高转化、零违规的 Listing。
 
-<Product_Facts>
-${normalizedPoints}
-</Product_Facts>
+【当前目标平台专属规则】：
+${platformRule}
 
-Product Facts are the single source of truth. You MUST strictly base your description ONLY on the <Product_Facts>. NEVER invent, infer, or fabricate any technical specifications, numerical values, battery life, wireless versions (e.g., Bluetooth 5.0), materials, or certifications (eco-friendly/anti-bacterial etc.) that are not explicitly listed.
-
-Requirements (Amazon 2026.07.27):
-1. Output exactly 1 Title (Item Name) + 1 Item Highlights + 5 Bullet Points. Both Title and Highlights are searchable, do not duplicate keywords between them.
-   - Title (Item Name): characterCount <= 75 including spaces. Must front-load Brand + Product Type + 1-2 core keywords within first 60 chars for mobile. Use Title Case (English: "Waterproof Bluetooth Speaker for Outdoor Use"; German: noun capitalization). NOT ALL CAPS. No markdown, no emoji, no special chars ! $ ? _ { } ^ ¬ ¦ ™ ® © € £ ¥, no promotional words (best/guaranteed/on sale/free shipping/premium/high-quality), no keyword stuffing (same word <=2 times), no repeated words, no invented specs. The title you output MUST already be <=75 characters - the validator will reject any title over 75 and trigger regeneration, do not output a truncated title with substring.
-   - Item Highlights: characterCount <=125 including spaces. Provide 1 concise line for secondary attributes (material/dimensions/compatibility/use case). No markdown, no emoji, no special chars, no promotional words, no repetition. Must differ from Title.
-   - Bullets: Exactly 5. Each bullet must start with ALL CAPS keyword + colon (e.g., "IP67 WATERPROOF DESIGN:"), then FACT + BENEFIT structure. Each bullet 10-255 chars, recommended <=200 for mobile, at least 100 chars. Use sentence fragments with semicolons to separate phrases. Write numbers one to nine in full except model/measurement. Absolutely prohibited words: perfect, amazing, ultimate, reliable and other meaningless adjectives. Absolutely prohibited sentence patterns: Whether you're..., you can trust..., etc. No markdown, no emoji, no special chars ™ ® © € £ ¥, no placeholder N/A/TBD, no guarantee phrases, no external links, no ASINs, no unverified claims (eco-friendly/anti-bacterial/made from bamboo unless explicitly in Product Facts). Use cold, objective, direct pain-point language.
-2. Output language must be【${langMap[platform]}】, translate Chinese facts into idiomatic target language, never copy Chinese verbatim. For German, apply German capitalization rules.
-3. Strictly follow plain text format: "【商品标题】" then "【商品亮点】" then "【五点描述】" sections only, no extra explanations or greetings.`;
+【通用安全与格式铁律（所有平台适用）】：
+1. 严禁自行捏造任何用户未提及的具体尺寸、精确重量或虚构功能。
+2. 严禁提及任何第三方知名品牌及商标进行蹭流侵权。
+3. 严禁使用医疗疗效词（cure, treat, relief, FDA approved）及违规农药词。
+4. 必须严格按照以下标签输出，标签内直接输出纯文本内容：
+【商品标题】
+【商品亮点】
+【五点描述】(极端严格：必须且只能以数字序号 "1. "、"2. "、"3. "、"4. "、"5. " 开头进行分行，严禁使用短横线 - 或圆点 • ！)
+【搜索词】`;
 
     const userPrompt = `产品中文名称：${productName.trim()}
 中文核心卖点：<Product_Facts>${normalizedPoints}</Product_Facts>`;
@@ -187,7 +216,7 @@ Requirements (Amazon 2026.07.27):
               const c2 = new AbortController();
               const t2 = setTimeout(() => c2.abort(), 30000);
               const compressed = await (async () => {
-                const prompt = `Compress this ${platform === "tiktok-en" ? "TikTok" : "Amazon"} ${platform === "amazon-de" ? "DE" : "US"} title to <=${tLimit} characters including spaces, keep natural ${platform === "amazon-de" ? "German" : "Title Case"}, no ALL CAPS, no markdown, ${platform === "tiktok-en" ? "" : "no emoji,"} no promotional words, front-load brand within 60 chars: "${lastTitle}" Product: "${productName.trim()}" Facts: "${normalizedPoints}" Platform: ${platformLabel}. Output ONLY the title.`;
+                const prompt = `Compress this ${platform === "tiktok-shop" ? "TikTok" : "Amazon"} ${platform === "amazon-de" ? "DE" : "US"} title to <=${tLimit} characters including spaces, keep natural ${platform === "amazon-de" ? "German" : "Title Case"}, no ALL CAPS, no markdown, ${platform === "tiktok-shop" ? "" : "no emoji,"} no promotional words, front-load brand within 60 chars: "${lastTitle}" Product: "${productName.trim()}" Facts: "${normalizedPoints}" Platform: ${platform}. Output ONLY the title.`;
                 const r = await fetch("https://api.siliconflow.cn/v1/chat/completions", {
                   method: "POST",
                   headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` },
@@ -280,6 +309,100 @@ Requirements (Amazon 2026.07.27):
     }
   };
 
+  const handleAutoFix = async () => {
+    if (!apiKey || apiKey.trim() === "") {
+      setError("请先配置 API Key");
+      return;
+    }
+    if (!result) return;
+    setIsFixing(true);
+    setError(null);
+    try {
+      const currentListing = {
+        title: result.title,
+        highlights: result.highlights ? [result.highlights] : [],
+        bullets: result.bullets,
+        searchTerms: "",
+      };
+      const allBulletViolations = hallucinationAlerts.map(a => `${a.type}: ${a.value}`);
+      const violations = allBulletViolations;
+      const userPrompt = `【全局智能合规审计与修复任务】
+当前 Listing 已被前端系统拦截，部分已知违规项如下：
+${violations.length > 0 ? violations.map((v, i) => `${i + 1}. ${v}`).join('\n') : '未检测到明显格式错误，请进行深度语义与侵权审查'}
+
+
+【当前 Listing 内容】：
+【当前标题】：${currentListing.title || ''}
+【当前亮点】：${(currentListing.highlights || []).join(' | ')}
+【当前五点】：
+${(currentListing.bullets || []).join('\n')}
+【当前搜索词】：${currentListing.searchTerms || ''}
+
+
+🟟【最高修复指令（AI 独立审查权）】：
+1. 突破前端限制：即使上方【已知违规项】未提及，你也必须主动扫描并清除文本中隐藏的任何第三方品牌（如 Apple, Sony）、医疗宣称及绝对化极限词！
+2. 彻底洗白：将所有违规词重写为安全中性的功能描述。
+3. 严格遵循上方【${platform} 专属规则】的字数截断与格式约束！
+4. 严格按照标签格式输出修复后的完整内容。
+5. 🟟最高铁律：必须 100% 使用【${platform}】对应的本土化外语输出，严禁在结果中出现任何中文字符！`;
+
+      const platformRule = PLATFORM_PROMPTS[platform] || PLATFORM_PROMPTS["amazon-us"];
+      const systemPrompt = `你是一名精通多平台出海运营的资深 Listing 专家。当前目标平台为：${platform}。
+你的任务是生成或修复高转化、零违规的 Listing。
+
+【当前目标平台专属规则】：
+${platformRule}
+
+【通用安全与格式铁律（所有平台适用）】：
+1. 严禁自行捏造任何用户未提及的具体尺寸、精确重量或虚构功能。
+2. 严禁提及任何第三方知名品牌及商标进行蹭流侵权。
+3. 严禁使用医疗疗效词（cure, treat, relief, FDA approved）及违规农药词。
+4. 必须严格按照以下标签输出，标签内直接输出纯文本内容：
+【商品标题】
+【商品亮点】
+【五点描述】(极端严格：必须且只能以数字序号 "1. "、"2. "、"3. "、"4. "、"5. " 开头进行分行，严禁使用短横线 - 或圆点 • ！)
+【搜索词】`;
+
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), 45000);
+      const response = await fetch("https://api.siliconflow.cn/v1/chat/completions", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` },
+        body: JSON.stringify({
+          model: "Qwen/Qwen2.5-72B-Instruct",
+          messages: [
+            { role: "system", content: systemPrompt },
+            { role: "user", content: userPrompt },
+          ],
+          temperature: 0.5,
+          max_tokens: 2048,
+        }),
+        signal: controller.signal,
+      });
+      clearTimeout(timer);
+      if (!response.ok) {
+        const errText = await response.text();
+        throw new Error(`HTTP ${response.status}: ${errText.slice(0, 200)}`);
+      }
+      const data = await response.json();
+      const content: string | undefined = data?.choices?.[0]?.message?.content;
+      if (!content) throw new Error("返回数据为空");
+      const parsed = parseListingContent(content);
+      setResult(parsed);
+      const fullText = `${parsed.title}\n${parsed.highlights}\n${parsed.bullets.join("\n")}`;
+      const normalizedPoints = sellingPoints.trim().replace(/[\/／]/g, "、").replace(/[,，]/g, "、");
+      const originalFacts = normalizedPoints.split(/[、\n]+/).map((s) => s.trim()).filter(Boolean);
+      if (productName.trim()) originalFacts.unshift(productName.trim());
+      setHallucinationAlerts(validateFacts(fullText, originalFacts));
+    } catch (err: unknown) {
+      console.error(err);
+      const msg = err instanceof Error && err.name === "AbortError" ? "请求超时（45s），请重试" : "自动修复失败，请检查网络或 API 配置";
+      setError(msg);
+    } finally {
+      setIsFixing(false);
+    }
+  };
+
   const handleCopy = async () => {
     if (!result) return;
     const text = `标题:\n${result.title}\n\n商品亮点:\n${result.highlights || "—"}\n\n五点描述:\n${result.bullets.map((b, i) => `${i + 1}. ${b}`).join("\n")}`;
@@ -304,6 +427,19 @@ Requirements (Amazon 2026.07.27):
           <span className="rounded-full border border-violet-200 bg-violet-50 px-3 py-1 text-xs font-medium text-violet-700">硅基流动 · Qwen2.5-72B</span>
         </div>
       </header>
+      <div className="mx-auto max-w-[1160px] px-4 sm:px-6 lg:px-8 pt-4">
+        <div className="flex items-center gap-2 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2">
+          <span className="text-xs font-medium text-amber-800 whitespace-nowrap">🔑 API Key</span>
+          <input
+            type="password"
+            value={apiKey}
+            onChange={(e) => { setApiKey(e.target.value); localStorage.setItem('siliconflow_key', e.target.value); }}
+            placeholder="填入硅基流动 sk-...（仅本地存储）"
+            className="flex-1 bg-white rounded-lg border border-amber-200 px-3 py-1.5 text-sm text-slate-900 placeholder:text-slate-400 focus:border-violet-400 focus:outline-none focus:ring-2 focus:ring-violet-100"
+          />
+          <span className="hidden sm:inline text-xs text-amber-700">本地存储·不上传</span>
+        </div>
+      </div>
       <main className="mx-auto max-w-[1160px] px-4 py-6 sm:px-6 lg:px-8 lg:py-8">
         <div className="grid grid-cols-1 gap-6 lg:grid-cols-[420px_1fr]">
           <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm lg:sticky lg:top-[88px] lg:h-fit">
@@ -313,18 +449,18 @@ Requirements (Amazon 2026.07.27):
               <div><label className="mb-2 block text-sm font-medium text-slate-700">产品中文名称 <span className="text-red-500">*</span></label><input value={productName} onChange={(e) => setProductName(e.target.value)} placeholder="例如：便携式蓝牙音箱" className="w-full rounded-xl border border-slate-200 bg-white px-3.5 py-2.5 text-sm text-slate-900 placeholder:text-slate-400 focus:border-violet-400 focus:outline-none focus:ring-4 focus:ring-violet-100" /></div>
               <div><label className="mb-2 block text-sm font-medium text-slate-700">中文核心卖点 <span className="text-red-500">*</span></label><textarea value={sellingPoints} onChange={(e) => setSellingPoints(e.target.value)} placeholder="例如：防水、长续航、便携、360°环绕音..." rows={4} className="w-full resize-none rounded-xl border border-slate-200 bg-white px-3.5 py-2.5 text-sm text-slate-900 placeholder:text-slate-400 focus:border-violet-400 focus:outline-none focus:ring-4 focus:ring-violet-100" /><p className="mt-2 text-xs text-slate-400">用逗号或换行分隔多个卖点</p></div>
               <div><label className="mb-2 block text-sm font-medium text-slate-700">目标平台与语种</label><div className="relative"><select value={platform} onChange={(e) => setPlatform(e.target.value as Platform)} className="w-full appearance-none rounded-xl border border-slate-200 bg-white px-3.5 py-2.5 pr-10 text-sm text-slate-900 focus:border-violet-400 focus:outline-none focus:ring-4 focus:ring-violet-100">{PLATFORM_OPTIONS.map((opt) => (<option key={opt.value} value={opt.value}>{opt.label}</option>))}</select><span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-slate-400"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M6 9l6 6 6-6" /></svg></span></div><p className="mt-2 text-xs text-slate-400">{PLATFORM_OPTIONS.find((o) => o.value === platform)?.hint}</p></div>
-              <button onClick={handleGenerate} disabled={!canGenerate || isGenerating} className="flex w-full items-center justify-center gap-2 rounded-xl bg-violet-600 px-4 py-3 text-sm font-semibold text-white shadow-sm transition hover:bg-violet-700 disabled:cursor-not-allowed disabled:bg-slate-300">{isGenerating ? (<><span className="h-4 w-4 animate-spin rounded-full border-2 border-white/30 border-t-white" />生成中...</>) : (<><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M12 2l2.4 7.2H22l-6.2 4.5 2.4 7.3L12 16.5 5.8 21l2.4-7.3L2 9.2h7.6z" /></svg>一键生成本土化Listing</>)}</button>
-              <p className="text-center text-xs text-slate-400">已接入硅基流动 Qwen2.5-72B，需配置 .env</p>
+              <button onClick={handleGenerate} disabled={!canGenerate || isGenerating || isFixing} className="flex w-full items-center justify-center gap-2 rounded-xl bg-violet-600 px-4 py-3 text-sm font-semibold text-white shadow-sm transition hover:bg-violet-700 disabled:cursor-not-allowed disabled:bg-slate-300">{isGenerating ? (<><span className="h-4 w-4 animate-spin rounded-full border-2 border-white/30 border-t-white" />生成中...</>) : (<><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M12 2l2.4 7.2H22l-6.2 4.5 2.4 7.3L12 16.5 5.8 21l2.4-7.3L2 9.2h7.6z" /></svg>一键生成本土化Listing</>)}</button>
+              <p className="text-center text-xs text-slate-400">已接入硅基流动 Qwen2.5-72B · 密钥本地存储</p>
             </div>
           </section>
           <section className="rounded-2xl border border-slate-200 bg-white shadow-sm">
-            <div className="flex items-center justify-between border-b border-slate-100 px-6 py-4"><h2 className="text-sm font-semibold text-slate-900">生成结果</h2><button onClick={handleCopy} disabled={!result} className="inline-flex items-center gap-1.5 rounded-full border border-slate-200 bg-white px-3.5 py-1.5 text-xs font-medium text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50">{copied ? (<><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#16a34a" strokeWidth="2"><path d="M5 13l4 4L19 7" /></svg><span className="text-green-600">已复制</span></>) : (<><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="9" y="9" width="13" height="13" rx="2" /><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v3" /></svg>一键复制</>)}</button></div>
+            <div className="flex items-center justify-between border-b border-slate-100 px-6 py-4"><h2 className="text-sm font-semibold text-slate-900">生成结果</h2><div className="flex items-center gap-2"><button onClick={handleAutoFix} disabled={!result || isFixing || isGenerating} className="inline-flex items-center gap-1 rounded-full bg-amber-500 px-3 py-1.5 text-xs font-medium text-white transition hover:bg-amber-600 disabled:cursor-not-allowed disabled:opacity-50">{isFixing ? (<><span className="h-3 w-3 animate-spin rounded-full border-2 border-white/30 border-t-white" />修复中...</>) : "⚡ 一键合规修复"}</button><button onClick={handleCopy} disabled={!result} className="inline-flex items-center gap-1.5 rounded-full border border-slate-200 bg-white px-3.5 py-1.5 text-xs font-medium text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50">{copied ? (<><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#16a34a" strokeWidth="2"><path d="M5 13l4 4L19 7" /></svg><span className="text-green-600">已复制</span></>) : (<><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="9" y="9" width="13" height="13" rx="2" /><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v3" /></svg>一键复制</>)}</button></div></div>
             <div className="p-6">
-              {error ? (<div className="rounded-xl border border-red-200 bg-red-50 px-4 py-6 text-center"><p className="text-sm font-medium text-red-700">生成失败，请检查网络或 API 配置</p><p className="mt-2 text-xs text-red-500">{error}</p></div>) : !result ? (<div className="flex flex-col items-center justify-center rounded-xl border border-dashed border-slate-200 bg-slate-50 px-6 py-16 text-center"><div className="flex h-12 w-12 items-center justify-center rounded-full bg-white shadow-sm"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#94a3b8" strokeWidth="1.8"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z" /><path d="M14 2v6h6" /></svg></div><p className="mt-4 text-sm font-medium text-slate-700">暂无生成结果</p><p className="mt-1 max-w-[320px] text-sm leading-5 text-slate-500">请在左侧填写产品信息并选择目标平台，点击“生成”即可在此预览</p></div>) : (<div className="space-y-6"><div><div className="mb-2 flex items-center gap-2"><span className="h-1.5 w-1.5 rounded-full bg-violet-600" /><h3 className="text-sm font-semibold text-slate-900">标题</h3>{(() => {const disp = getTitleDisplayForPlatform(result.title, platform);const v = validateTitleForPlatform(result.title, platform);const over = v.violations.find((x) => x.type === "OVER_LENGTH");const other = v.violations.filter((x) => x.type !== "OVER_LENGTH");const brand = productName.trim().split(/\s+/)[0] || "";const mobile = platform === "tiktok-en" ? {warnings:[]} : validateTitleMobile(result.title, brand);return (<><span className={`rounded px-1.5 py-0.5 text-[11px] font-medium ${disp.status === "ok" ? "bg-emerald-50 text-emerald-700" : disp.status === "over" ? "bg-red-50 text-red-700" : "bg-amber-50 text-amber-700"}`}>{disp.text}</span><span className={`text-xs ${disp.status === "ok" ? "text-emerald-600" : disp.status === "over" ? "text-red-600" : "text-amber-600"}`}>{disp.message}</span>{over ? null : other.length ? <span className="text-xs text-amber-600">⚠ {other[0].message}</span> : null}{mobile.warnings.length ? <span className="text-xs text-amber-600">⚠ {mobile.warnings[0]}</span> : null}</>);})()}</div><div className={`rounded-xl border p-4 text-sm leading-6 ${getTitleDisplayForPlatform(result.title, platform).status === "over" ? "border-red-200 bg-red-50/50 text-slate-800" : "border-violet-100 bg-violet-50/50 text-slate-800"}`}>{result.title}</div></div><div><div className="mb-2 flex items-center gap-2"><span className="h-1.5 w-1.5 rounded-full bg-amber-500" /><h3 className="text-sm font-semibold text-slate-900">商品亮点</h3>{(() => {const dispH = getHighlightsDisplay(result.highlights);const vH = validateHighlights(result.highlights);const overH = vH.violations.find((x) => x.type === "OVER_LENGTH");const otherH = vH.violations.filter((x) => x.type !== "OVER_LENGTH");return (<><span className={`rounded px-1.5 py-0.5 text-[11px] font-medium ${dispH.status === "ok" ? "bg-emerald-50 text-emerald-700" : dispH.status === "over" ? "bg-red-50 text-red-700" : "bg-amber-50 text-amber-700"}`}>{dispH.text}</span><span className={`text-xs ${dispH.status === "ok" ? "text-emerald-600" : dispH.status === "over" ? "text-red-600" : "text-amber-600"}`}>{dispH.message}</span>{overH ? null : otherH.length ? <span className="text-xs text-amber-600">⚠ {otherH[0].message}</span> : null}</>);})()}</div><div className={`rounded-xl border p-4 text-sm leading-6 ${getHighlightsDisplay(result.highlights).status === "over" ? "border-red-200 bg-red-50/50 text-slate-600" : result.highlights ? "border-amber-100 bg-amber-50/50 text-slate-800" : "border-dashed border-slate-200 bg-slate-50 text-slate-400"}`}>{result.highlights || "— 暂无亮点"}</div></div><div><div className="mb-2 flex items-center gap-2"><span className="h-1.5 w-1.5 rounded-full bg-violet-600" /><h3 className="text-sm font-semibold text-slate-900">五点描述</h3></div><ul className="space-y-3">{result.bullets.map((b, idx) => {const disp = getBulletDisplay(b);const v = validateBullets([b]).bulletResults[0];const hasError = v.violations.some(x=> x.type==="OVER_LENGTH"||x.type==="BANNED_PHRASE"||x.type==="PLACEHOLDER"||x.type==="GUARANTEE");return (<li key={idx} className={`flex flex-col gap-1 rounded-xl border p-3.5 text-sm leading-6 ${hasError ? "border-red-200 bg-red-50/50 text-slate-800" : disp.status==="warning" ? "border-amber-200 bg-amber-50/50 text-slate-700" : "border-slate-200 bg-slate-50/50 text-slate-700"}`}><div className="flex gap-3"><span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-white text-xs font-semibold text-violet-700 shadow-sm">{idx + 1}</span><span className="flex-1">{b}</span></div><div className="ml-9 flex items-center gap-2 text-xs"><span className={`rounded px-1.5 py-0.5 text-[11px] font-medium ${disp.status==="ok" ? "bg-emerald-50 text-emerald-700" : disp.status==="over" ? "bg-red-50 text-red-700" : "bg-amber-50 text-amber-700"}`}>{disp.text}</span><span className={`${disp.status==="ok" ? "text-emerald-600" : disp.status==="over" ? "text-red-600" : "text-amber-600"}`}>{disp.message}</span>{v.violations.filter(x=>x.type!=="OVER_RECOMMENDED"&&x.type!=="MISSING_HEADER").slice(0,1).map((vv,i)=>(<span key={i} className="text-amber-600">⚠ {vv.message}</span>))}</div></li>);})}</ul></div>{(() => {const bv = validateBullets(result.bullets);return (<>{hallucinationAlerts.length > 0 && (<div className="rounded-xl border border-amber-200 bg-amber-50 p-4"><div className="flex items-start gap-2"><span className="mt-0.5 text-amber-600">⚠</span><div><p className="text-sm font-medium text-amber-800">Listing Health Alert: 发现疑似未验证参数 [{hallucinationAlerts.map((a) => a.value).join(", ")}]。AI 可能产生了幻觉，请人工核对是否需要保留。</p><p className="mt-1 text-xs text-amber-700">已基于 &lt;Product_Facts&gt; 进行比对，上述数值/版本未在原始事实中出现。{hallucinationAlerts.some(a=>a.type==="UNSUPPORTED_CLAIM") && " 含禁用声明需包装证明。"}</p></div></div></div>)}{bv.hasDuplicates && (<div className="rounded-xl border border-amber-200 bg-amber-50 p-3"><p className="text-xs font-medium text-amber-800">⚠ 五点存在重复内容，建议差异化</p></div>)}{bv.totalLength > 1000 && (<div className="rounded-xl border border-amber-200 bg-amber-50 p-3"><p className="text-xs font-medium text-amber-800">⚠ 五点总长 {bv.totalLength} &gt; 1000，建议压缩以适配移动端</p></div>)}</>);})()}</div>)}
+              {error ? (<div className="rounded-xl border border-red-200 bg-red-50 px-4 py-6 text-center"><p className="text-sm font-medium text-red-700">生成失败，请检查网络或 API 配置</p><p className="mt-2 text-xs text-red-500">{error}</p></div>) : !result ? (<div className="flex flex-col items-center justify-center rounded-xl border border-dashed border-slate-200 bg-slate-50 px-6 py-16 text-center"><div className="flex h-12 w-12 items-center justify-center rounded-full bg-white shadow-sm"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#94a3b8" strokeWidth="1.8"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z" /><path d="M14 2v6h6" /></svg></div><p className="mt-4 text-sm font-medium text-slate-700">暂无生成结果</p><p className="mt-1 max-w-[320px] text-sm leading-5 text-slate-500">请在左侧填写产品信息并选择目标平台，点击“生成”即可在此预览</p></div>) : (<div className="space-y-6"><div><div className="mb-2 flex items-center gap-2"><span className="h-1.5 w-1.5 rounded-full bg-violet-600" /><h3 className="text-sm font-semibold text-slate-900">标题</h3>{(() => {const disp = getTitleDisplayForPlatform(result.title, platform);const v = validateTitleForPlatform(result.title, platform);const over = v.violations.find((x) => x.type === "OVER_LENGTH");const other = v.violations.filter((x) => x.type !== "OVER_LENGTH");const brand = productName.trim().split(/\s+/)[0] || "";const mobile = platform === "tiktok-shop" ? {warnings:[]} : validateTitleMobile(result.title, brand);return (<><span className={`rounded px-1.5 py-0.5 text-[11px] font-medium ${disp.status === "ok" ? "bg-emerald-50 text-emerald-700" : disp.status === "over" ? "bg-red-50 text-red-700" : "bg-amber-50 text-amber-700"}`}>{disp.text}</span><span className={`text-xs ${disp.status === "ok" ? "text-emerald-600" : disp.status === "over" ? "text-red-600" : "text-amber-600"}`}>{disp.message}</span>{over ? null : other.length ? <span className="text-xs text-amber-600">⚠ {other[0].message}</span> : null}{mobile.warnings.length ? <span className="text-xs text-amber-600">⚠ {mobile.warnings[0]}</span> : null}</>);})()}</div><div className={`rounded-xl border p-4 text-sm leading-6 ${getTitleDisplayForPlatform(result.title, platform).status === "over" ? "border-red-200 bg-red-50/50 text-slate-800" : "border-violet-100 bg-violet-50/50 text-slate-800"}`}>{result.title}</div></div><div><div className="mb-2 flex items-center gap-2"><span className="h-1.5 w-1.5 rounded-full bg-amber-500" /><h3 className="text-sm font-semibold text-slate-900">商品亮点</h3>{(() => {const dispH = getHighlightsDisplay(result.highlights);const vH = validateHighlights(result.highlights);const overH = vH.violations.find((x) => x.type === "OVER_LENGTH");const otherH = vH.violations.filter((x) => x.type !== "OVER_LENGTH");return (<><span className={`rounded px-1.5 py-0.5 text-[11px] font-medium ${dispH.status === "ok" ? "bg-emerald-50 text-emerald-700" : dispH.status === "over" ? "bg-red-50 text-red-700" : "bg-amber-50 text-amber-700"}`}>{dispH.text}</span><span className={`text-xs ${dispH.status === "ok" ? "text-emerald-600" : dispH.status === "over" ? "text-red-600" : "text-amber-600"}`}>{dispH.message}</span>{overH ? null : otherH.length ? <span className="text-xs text-amber-600">⚠ {otherH[0].message}</span> : null}</>);})()}</div><div className={`rounded-xl border p-4 text-sm leading-6 ${getHighlightsDisplay(result.highlights).status === "over" ? "border-red-200 bg-red-50/50 text-slate-600" : result.highlights ? "border-amber-100 bg-amber-50/50 text-slate-800" : "border-dashed border-slate-200 bg-slate-50 text-slate-400"}`}>{result.highlights || "— 暂无亮点"}</div></div><div><div className="mb-2 flex items-center gap-2"><span className="h-1.5 w-1.5 rounded-full bg-violet-600" /><h3 className="text-sm font-semibold text-slate-900">五点描述</h3></div><ul className="space-y-3">{result.bullets.map((b, idx) => {const disp = getBulletDisplay(b);const v = validateBullets([b]).bulletResults[0];const hasError = v.violations.some(x=> x.type==="OVER_LENGTH"||x.type==="BANNED_PHRASE"||x.type==="PLACEHOLDER"||x.type==="GUARANTEE");return (<li key={idx} className={`flex flex-col gap-1 rounded-xl border p-3.5 text-sm leading-6 ${hasError ? "border-red-200 bg-red-50/50 text-slate-800" : disp.status==="warning" ? "border-amber-200 bg-amber-50/50 text-slate-700" : "border-slate-200 bg-slate-50/50 text-slate-700"}`}><div className="flex gap-3"><span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-white text-xs font-semibold text-violet-700 shadow-sm">{idx + 1}</span><span className="flex-1">{b}</span></div><div className="ml-9 flex items-center gap-2 text-xs"><span className={`rounded px-1.5 py-0.5 text-[11px] font-medium ${disp.status==="ok" ? "bg-emerald-50 text-emerald-700" : disp.status==="over" ? "bg-red-50 text-red-700" : "bg-amber-50 text-amber-700"}`}>{disp.text}</span><span className={`${disp.status==="ok" ? "text-emerald-600" : disp.status==="over" ? "text-red-600" : "text-amber-600"}`}>{disp.message}</span>{v.violations.filter(x=>x.type!=="OVER_RECOMMENDED"&&x.type!=="MISSING_HEADER").slice(0,1).map((vv,i)=>(<span key={i} className="text-amber-600">⚠ {vv.message}</span>))}</div></li>);})}</ul></div>{(() => {const bv = validateBullets(result.bullets);return (<>{hallucinationAlerts.length > 0 && (<div className="rounded-xl border border-amber-200 bg-amber-50 p-4"><div className="flex items-start gap-2"><span className="mt-0.5 text-amber-600">⚠</span><div><p className="text-sm font-medium text-amber-800">Listing Health Alert: 发现疑似未验证参数 [{hallucinationAlerts.map((a) => a.value).join(", ")}]。AI 可能产生了幻觉，请人工核对是否需要保留。</p><p className="mt-1 text-xs text-amber-700">已基于 &lt;Product_Facts&gt; 进行比对，上述数值/版本未在原始事实中出现。{hallucinationAlerts.some(a=>a.type==="UNSUPPORTED_CLAIM") && " 含禁用声明需包装证明。"}</p></div></div></div>)}{bv.hasDuplicates && (<div className="rounded-xl border border-amber-200 bg-amber-50 p-3"><p className="text-xs font-medium text-amber-800">⚠ 五点存在重复内容，建议差异化</p></div>)}{bv.totalLength > 1000 && (<div className="rounded-xl border border-amber-200 bg-amber-50 p-3"><p className="text-xs font-medium text-amber-800">⚠ 五点总长 {bv.totalLength} &gt; 1000，建议压缩以适配移动端</p></div>)}</>);})()}</div>)}
             </div>
           </section>
         </div>
-        <p className="mt-6 text-center text-xs text-slate-400">已接入硅基流动 · Qwen2.5-72B · 75字符标题 + 125字符亮点 均可被搜索 · 密钥 VITE_SILICONFLOW_API_KEY</p>
+        <p className="mt-6 text-center text-xs text-slate-400">已接入硅基流动 · Qwen2.5-72B · 75字符标题 + 125字符亮点 均可被搜索 · 密钥本地存储</p>
       </main>
     </div>
   );
