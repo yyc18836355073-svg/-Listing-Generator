@@ -422,33 +422,25 @@ ${platformRule}
     setIsFixing(true);
     setError(null);
     try {
-      const currentListing = {
-        title: result.title,
-        highlights: result.highlights ? [result.highlights] : [],
-        bullets: result.bullets,
-        searchTerms: "",
-      };
-      const allBulletViolations = hallucinationAlerts.map(a => `${a.type}: ${a.value}`);
-      const violations = allBulletViolations;
-      const userPrompt = `【全局智能合规审计与修复任务】
-当前 Listing 已被前端系统拦截，部分已知违规项如下：
-${violations.length > 0 ? violations.map((v, i) => `${i + 1}. ${v}`).join('\n') : '未检测到明显格式错误，请进行深度语义与侵权审查'}
+      // Task2: 单轨 - 只取当前 Tab 的那一套文案
+      const currentTab = variants && variants[activeVariant] ? variants[activeVariant] : { title: result.title, highlights: result.highlights, strategy: "当前" };
+      const violationsForFix = hallucinationAlerts.map(a => `${a.type}: ${a.value}`);
+      const userPrompt = `【最高优先级：微创合规清洗任务】
+你现在的角色是一位极其严谨的跨境电商风控法务。
+以下是当前【唯一】需要修复的商品文案，它已被系统拦截，包含以下致命违规项：
+${violationsForFix.length > 0 ? violationsForFix.join('\n') : '请进行深度语义与侵权盲区审查'}
 
 
-【当前 Listing 内容】：
-【当前标题】：${currentListing.title || ''}
-【当前亮点】：${(currentListing.highlights || []).join(' | ')}
-【当前五点】：
-${(currentListing.bullets || []).join('\n')}
-【当前搜索词】：${currentListing.searchTerms || ''}
+【待修复文案】：
+[标题]：${currentTab.title}
+[亮点]：${currentTab.highlights}
+[五点]：${result.bullets.join('\n')}
 
 
-🟟【最高修复指令（AI 独立审查权）】：
-1. 突破前端限制：即使上方【已知违规项】未提及，你也必须主动扫描并清除文本中隐藏的任何第三方品牌（如 Apple, Sony）、医疗宣称及绝对化极限词！
-2. 彻底洗白：将所有违规词重写为安全中性的功能描述。
-3. 严格遵循上方【${platform} 专属规则】的字数截断与格式约束！
-4. 严格按照标签格式输出修复后的完整内容。
-5. 🟟最高铁律：必须 100% 使用【${platform}】对应的本土化外语输出，严禁在结果中出现任何中文字符！`;
+【强制执行铁律】：
+1. 定向切除：精准锁定病灶，将违禁声明（如 anti-microbial）和侵权品牌（如 Apple）替换为安全中性的词汇（如 clean and fresh, smart home systems）。
+2. 无损替换：严禁推翻重写！必须 100% 保留原有的句式结构、营销逻辑和字符长度。
+3. 单一纯净：只需返回这【一套】修复完毕的文案，严禁输出多个变体，严禁在正文外附加任何解释性文字。`;
 
       const platformRule = PLATFORM_PROMPTS[platform] || PLATFORM_PROMPTS["amazon-us"];
       const systemPrompt = `你是一名精通多平台出海运营的资深 Listing 专家。当前目标平台为：${platform}。
@@ -492,7 +484,19 @@ ${platformRule}
       const content: string | undefined = data?.choices?.[0]?.message?.content;
       if (!content) throw new Error("返回数据为空");
       const parsed = parseListingContent(content);
-      setResult(parsed);
+      // Task3: 仅仅覆盖当前激活的变体
+      if (variants && variants.length === 3) {
+        const newVariants = [...variants];
+        newVariants[activeVariant] = {
+          title: parsed.title || currentTab.title,
+          highlights: parsed.highlights || currentTab.highlights,
+          strategy: currentTab.strategy,
+        };
+        setVariants(newVariants);
+        setResult(prev => prev ? { ...prev, title: newVariants[activeVariant].title, highlights: newVariants[activeVariant].highlights, bullets: parsed.bullets.length ? parsed.bullets : prev.bullets } : parsed);
+      } else {
+        setResult(parsed);
+      }
       const fullText = `${parsed.title}\n${parsed.highlights}\n${parsed.bullets.join("\n")}`;
       const normalizedPoints = sellingPoints.trim().replace(/[\/／]/g, "、").replace(/[,，]/g, "、");
       const originalFacts = normalizedPoints.split(/[、\n]+/).map((s) => s.trim()).filter(Boolean);

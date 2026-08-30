@@ -34,6 +34,8 @@ const PLACEHOLDERS = ["n/a", "na", "not applicable", "tbd", "to be decided", "ye
 
 const GUARANTEE_PHRASES = ["money-back guarantee", "full refund", "money back", "100% guarantee", "satisfaction guarantee"];
 
+const brandInfringementWords = ['apple', 'iphone', 'ipad', 'homekit', 'macbook', 'sony', 'bose', 'jbl', 'beats', 'anker', 'bluetooth', 'wi-fi', 'velcro', 'teflon'];
+
 const EXTERNAL_LINK_PATTERN = /(https?:\/\/|www\.|\.com|\.net|\.org|@\w+\.\w+|phone:|tel:)/i;
 const ASIN_PATTERN = /\bB0[A-Z0-9]{8}\b/;
 
@@ -58,6 +60,14 @@ export function validateBullet(bullet: string): BulletValidationResult {
     if (lower.includes(phrase.toLowerCase())) {
       violations.push({ type: "BANNED_PHRASE", message: `包含禁用声明: ${phrase}` });
       break;
+    }
+  }
+
+  // 高危品牌词（强制小写+正则i，确保 Apple/apple 均命中）
+  for (const w of brandInfringementWords) {
+    const re = new RegExp(`\\b${w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'i');
+    if (re.test(lower)) {
+      violations.push({ type: "BANNED_PHRASE", message: `包含高危侵权第三方品牌词【${w}】：极易触发算法扫号封店` });
     }
   }
 
