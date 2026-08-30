@@ -581,7 +581,7 @@ ${platformRule}
               <p className="mt-1 hidden text-xs text-slate-500 sm:block">一键生成符合2026新规的标题(75)+亮点(125)+五点描述</p>
             </div>
           </div>
-          <span className="rounded-full border border-violet-200 bg-violet-50 px-3 py-1 text-xs font-medium text-violet-700">硅基流动 · {MODEL_OPTIONS.find(m=>m.value===selectedModel)?.label || selectedModel}</span>
+
         </div>
       </header>
       <div className="mx-auto max-w-[1160px] px-4 sm:px-6 lg:px-8 pt-4">
