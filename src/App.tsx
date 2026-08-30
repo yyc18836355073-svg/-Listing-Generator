@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect, useRef } from "react";
 import { cleanTitleDeterministic, validateHighlights, cleanHighlightsDeterministic, getHighlightsDisplay, validateTitleMobile, toTitleCaseGerman, validateTitleForPlatform, getTitleDisplayForPlatform, getTitleLimitForPlatform } from "./lib/titleValidator";
 import { validateFacts } from "./lib/factValidator";
 import { validateBullets, getBulletDisplay } from "./lib/bulletValidator";
@@ -138,6 +138,19 @@ export default function App() {
   const [error, setError] = useState<string | null>(null);
   const [hallucinationAlerts, setHallucinationAlerts] = useState<Array<{ type: string; value: string }>>([]);
 
+  // Task3: Draft
+  type Draft = { id: string; timestamp: number; productName: string; sellingPoints: string; platform: Platform; coreKeywords: string; result: ListingResult | null; selectedModel: string };
+  const [drafts, setDrafts] = useState<Draft[]>(() => {
+    try { return JSON.parse(localStorage.getItem('listing_drafts') || '[]'); } catch { return []; }
+  });
+  const [isDraftDrawerOpen, setIsDraftDrawerOpen] = useState(false);
+  const draftTimerRef = useRef<number | null>(null);
+
+  // Task4: Variants
+  type Variant = { title: string; highlights: string; strategy: string };
+  const [variants, setVariants] = useState<Variant[] | null>(null);
+  const [activeVariant, setActiveVariant] = useState(0);
+
   const keywordsList = coreKeywords.split(/[,，\n]+/).map(s=>s.trim()).filter(Boolean);
   const highlightKeywords = (text: string) => {
     if (!keywordsList.length || !text) return text;
@@ -158,7 +171,44 @@ export default function App() {
     return { hit: hit.length, total: keywordsList.length, missing, hitList: hit };
   })();
 
+  // Task3: Auto-save drafts every 5s (debounce)
+  useEffect(() => {
+    if (draftTimerRef.current) window.clearTimeout(draftTimerRef.current);
+    draftTimerRef.current = window.setTimeout(() => {
+      if (!productName && !sellingPoints && !result) return;
+      const draft: Draft = { id: Date.now().toString(), timestamp: Date.now(), productName, sellingPoints, platform, coreKeywords, result, selectedModel };
+      setDrafts(prev => {
+        const next = [draft, ...prev].slice(0, 10);
+        try { localStorage.setItem('listing_drafts', JSON.stringify(next)); } catch {}
+        return next;
+      });
+    }, 5000);
+    return () => { if (draftTimerRef.current) window.clearTimeout(draftTimerRef.current); };
+  }, [productName, sellingPoints, platform, coreKeywords, result, selectedModel]);
+
   const canGenerate = productName.trim().length > 0 && sellingPoints.trim().length > 0;
+
+  const restoreDraft = (d: Draft) => {
+    setProductName(d.productName);
+    setSellingPoints(d.sellingPoints);
+    setPlatform(d.platform as Platform);
+    setCoreKeywords(d.coreKeywords);
+    setSelectedModel(d.selectedModel || 'Qwen/Qwen2.5-72B-Instruct');
+    localStorage.setItem('siliconflow_model', d.selectedModel || 'Qwen/Qwen2.5-72B-Instruct');
+    if (d.result) {
+      setResult(d.result);
+      setVariants(null);
+      setActiveVariant(0);
+    }
+    setIsDraftDrawerOpen(false);
+  };
+  const deleteDraft = (id: string) => {
+    setDrafts(prev => {
+      const next = prev.filter(d=>d.id!==id);
+      localStorage.setItem('listing_drafts', JSON.stringify(next));
+      return next;
+    });
+  };
 
   const handleGenerate = async () => {
     if (!apiKey || apiKey.trim() === "") {
@@ -188,8 +238,8 @@ ${platformRule}
 2. 严禁提及任何第三方知名品牌及商标进行蹭流侵权。
 3. 严禁使用医疗疗效词（cure, treat, relief, FDA approved）及违规农药词。
 4. 必须严格按照以下标签输出，标签内直接输出纯文本内容：
-【商品标题】
-【商品亮点】
+【商品标题 - 变体矩阵】请为标题和亮点各输出3套差异化变体，策略A-极简参数风、策略B-痛点解决风、策略C-感官营销风，以JSON格式输出：
+{"variants":[{"strategy":"极简参数风","title":"...","highlights":"..."},{"strategy":"痛点解决风","title":"...","highlights":"..."},{"strategy":"感官营销风","title":"...","highlights":"..."}]}
 【五点描述】(极端严格：必须且只能以数字序号 "1. "、"2. "、"3. "、"4. "、"5. " 开头进行分行，严禁使用短横线 - 或圆点 • ！)
 【搜索词】`;
 
@@ -223,6 +273,31 @@ ${platformRule}
       const content: string | undefined = data?.choices?.[0]?.message?.content;
       if (!content) throw new Error("返回数据为空");
       let parsed = parseListingContent(content);
+      // Task4: Try to parse 3 variants JSON
+      try {
+        const jsonMatch = content.match(/\{[\s\S]*"variants"[\s\S]*\}/);
+        if (jsonMatch) {
+          const j = JSON.parse(jsonMatch[0]);
+          if (j.variants && Array.isArray(j.variants) && j.variants.length >= 3) {
+            const vs = j.variants.slice(0,3).map((v:any)=>({title: String(v.title||""), highlights: String(v.highlights||""), strategy: String(v.strategy||"")}));
+            setVariants(vs);
+            setActiveVariant(0);
+            parsed = { ...parsed, title: vs[0].title || parsed.title, highlights: vs[0].highlights || parsed.highlights };
+          } else {
+            setVariants(null);
+          }
+        } else {
+          // Fallback: try delimiter based parsing
+          const varSections = content.split(/【变体[一二三123]/).filter(s=>s.includes("【商品标题】")||s.includes("标题"));
+          if (varSections.length>=3) {
+            const vs = varSections.slice(0,3).map((sec,i)=> {
+              const p = parseListingContent(sec);
+              return {title: p.title, highlights: p.highlights, strategy: ["极简参数风","痛点解决风","感官营销风"][i]||`变体${i+1}`};
+            });
+            if (vs[0].title) { setVariants(vs); setActiveVariant(0); parsed = {...parsed, title: vs[0].title, highlights: vs[0].highlights}; } else setVariants(null);
+          } else setVariants(null);
+        }
+      } catch { setVariants(null); }
       if (platform === "amazon-de") {
         parsed = { ...parsed, title: toTitleCaseGerman(parsed.title) };
       }
@@ -500,18 +575,51 @@ ${platformRule}
               <div><label className="mb-2 block text-sm font-medium text-slate-700">核心搜索词（SEO）</label><input value={coreKeywords} onChange={(e) => setCoreKeywords(e.target.value)} placeholder="例如：waterproof, bluetooth, portable（逗号分隔）" className="w-full rounded-xl border border-slate-200 bg-white px-3.5 py-2.5 text-sm text-slate-900 placeholder:text-slate-400 focus:border-violet-400 focus:outline-none focus:ring-4 focus:ring-violet-100" /><p className="mt-1 text-xs text-slate-400">用于标题/五点埋词检测与高亮</p></div>
               <div><label className="mb-2 block text-sm font-medium text-slate-700">目标平台与语种</label><div className="relative"><select value={platform} onChange={(e) => setPlatform(e.target.value as Platform)} className="w-full appearance-none rounded-xl border border-slate-200 bg-white px-3.5 py-2.5 pr-10 text-sm text-slate-900 focus:border-violet-400 focus:outline-none focus:ring-4 focus:ring-violet-100">{PLATFORM_OPTIONS.map((opt) => (<option key={opt.value} value={opt.value}>{opt.label}</option>))}</select><span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-slate-400"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M6 9l6 6 6-6" /></svg></span></div><p className="mt-2 text-xs text-slate-400">{PLATFORM_OPTIONS.find((o) => o.value === platform)?.hint}</p></div>
               <button onClick={handleGenerate} disabled={!canGenerate || isGenerating || isFixing} className="flex w-full items-center justify-center gap-2 rounded-xl bg-violet-600 px-4 py-3 text-sm font-semibold text-white shadow-sm transition hover:bg-violet-700 disabled:cursor-not-allowed disabled:bg-slate-300">{isGenerating ? (<><span className="h-4 w-4 animate-spin rounded-full border-2 border-white/30 border-t-white" />生成中...</>) : (<><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M12 2l2.4 7.2H22l-6.2 4.5 2.4 7.3L12 16.5 5.8 21l2.4-7.3L2 9.2h7.6z" /></svg>一键生成本土化Listing</>)}</button>
-              <p className="text-center text-xs text-slate-400">已接入硅基流动 {MODEL_OPTIONS.find(m=>m.value===selectedModel)?.label || "Qwen2.5-72B"} · 密钥本地存储</p>
+              <button onClick={()=>setIsDraftDrawerOpen(true)} className="w-full flex items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-medium text-slate-700 hover:bg-slate-50">
+                📋 历史草稿箱 ({drafts.length}/10) {drafts.length>0 && <span className="text-xs text-slate-400">· {new Date(drafts[0].timestamp).toLocaleTimeString()}</span>}
+              </button>
+              <p className="text-center text-xs text-slate-400">已接入硅基流动 {MODEL_OPTIONS.find(m=>m.value===selectedModel)?.label || "Qwen2.5-72B"} · 密钥本地存储 · 自动保存5秒防丢</p>
             </div>
           </section>
           <section className="rounded-2xl border border-slate-200 bg-white shadow-sm">
             <div className="flex items-center justify-between border-b border-slate-100 px-6 py-4"><h2 className="text-sm font-semibold text-slate-900">生成结果</h2><div className="flex items-center gap-2"><button onClick={handleAutoFix} disabled={!result || isFixing || isGenerating} className="inline-flex items-center gap-1 rounded-full bg-amber-500 px-3 py-1.5 text-xs font-medium text-white transition hover:bg-amber-600 disabled:cursor-not-allowed disabled:opacity-50">{isFixing ? (<><span className="h-3 w-3 animate-spin rounded-full border-2 border-white/30 border-t-white" />修复中...</>) : "⚡ 一键合规修复"}</button><button onClick={handleCopy} disabled={!result} className="inline-flex items-center gap-1.5 rounded-full border border-slate-200 bg-white px-3.5 py-1.5 text-xs font-medium text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50">{copied ? (<><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#16a34a" strokeWidth="2"><path d="M5 13l4 4L19 7" /></svg><span className="text-green-600">已复制</span></>) : (<><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="9" y="9" width="13" height="13" rx="2" /><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v3" /></svg>一键复制</>)}</button></div></div>
             <div className="p-6">
-              {error ? (<div className="rounded-xl border border-red-200 bg-red-50 px-4 py-6 text-center"><p className="text-sm font-medium text-red-700">生成失败，请检查网络或 API 配置</p><p className="mt-2 text-xs text-red-500">{error}</p></div>) : !result ? (<div className="flex flex-col items-center justify-center rounded-xl border border-dashed border-slate-200 bg-slate-50 px-6 py-16 text-center"><div className="flex h-12 w-12 items-center justify-center rounded-full bg-white shadow-sm"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#94a3b8" strokeWidth="1.8"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z" /><path d="M14 2v6h6" /></svg></div><p className="mt-4 text-sm font-medium text-slate-700">暂无生成结果</p><p className="mt-1 max-w-[320px] text-sm leading-5 text-slate-500">请在左侧填写产品信息并选择目标平台，点击“生成”即可在此预览</p></div>) : (<div className="space-y-6">{coverage && (<div className="rounded-xl border border-blue-200 bg-blue-50 px-4 py-3 flex items-center justify-between"><div className="text-sm"><span className="font-medium text-blue-900">SEO 关键词覆盖率：</span><span className="text-blue-700">已埋入 {coverage.hit}/{coverage.total}</span>{coverage.missing.length>0 && <span className="text-amber-700"> 未命中：{coverage.missing.join(", ")}</span>}</div><span className={`text-xs px-2 py-1 rounded-full font-medium ${coverage.hit===coverage.total?"bg-emerald-100 text-emerald-800":"bg-amber-100 text-amber-800"}`}>{coverage.hit===coverage.total?"✅ 全覆盖":"⚠️ 待优化"}</span></div>)}<div><div className="mb-2 flex items-center gap-2"><span className="h-1.5 w-1.5 rounded-full bg-violet-600" /><h3 className="text-sm font-semibold text-slate-900">标题</h3>{(() => {const disp = getTitleDisplayForPlatform(result.title, platform);const v = validateTitleForPlatform(result.title, platform);const over = v.violations.find((x) => x.type === "OVER_LENGTH");const other = v.violations.filter((x) => x.type !== "OVER_LENGTH");const brand = productName.trim().split(/\s+/)[0] || "";const mobile = platform === "tiktok-shop" ? {warnings:[]} : validateTitleMobile(result.title, brand);return (<><span className={`rounded px-1.5 py-0.5 text-[11px] font-medium ${disp.status === "ok" ? "bg-emerald-50 text-emerald-700" : disp.status === "over" ? "bg-red-50 text-red-700" : "bg-amber-50 text-amber-700"}`}>{disp.text}</span><span className={`text-xs ${disp.status === "ok" ? "text-emerald-600" : disp.status === "over" ? "text-red-600" : "text-amber-600"}`}>{disp.message}</span>{over ? null : other.length ? <span className="text-xs text-amber-600">⚠ {other[0].message}</span> : null}{mobile.warnings.length ? <span className="text-xs text-amber-600">⚠ {mobile.warnings[0]}</span> : null}</>);})()}</div><div className={`rounded-xl border p-4 text-sm leading-6 ${getTitleDisplayForPlatform(result.title, platform).status === "over" ? "border-red-200 bg-red-50/50 text-slate-800" : "border-violet-100 bg-violet-50/50 text-slate-800"}`}>{highlightKeywords(result.title)}</div></div><div><div className="mb-2 flex items-center gap-2"><span className="h-1.5 w-1.5 rounded-full bg-amber-500" /><h3 className="text-sm font-semibold text-slate-900">商品亮点</h3>{(() => {const dispH = getHighlightsDisplay(result.highlights);const vH = validateHighlights(result.highlights);const overH = vH.violations.find((x) => x.type === "OVER_LENGTH");const otherH = vH.violations.filter((x) => x.type !== "OVER_LENGTH");return (<><span className={`rounded px-1.5 py-0.5 text-[11px] font-medium ${dispH.status === "ok" ? "bg-emerald-50 text-emerald-700" : dispH.status === "over" ? "bg-red-50 text-red-700" : "bg-amber-50 text-amber-700"}`}>{dispH.text}</span><span className={`text-xs ${dispH.status === "ok" ? "text-emerald-600" : dispH.status === "over" ? "text-red-600" : "text-amber-600"}`}>{dispH.message}</span>{overH ? null : otherH.length ? <span className="text-xs text-amber-600">⚠ {otherH[0].message}</span> : null}</>);})()}</div><div className={`rounded-xl border p-4 text-sm leading-6 ${getHighlightsDisplay(result.highlights).status === "over" ? "border-red-200 bg-red-50/50 text-slate-600" : result.highlights ? "border-amber-100 bg-amber-50/50 text-slate-800" : "border-dashed border-slate-200 bg-slate-50 text-slate-400"}`}>{result.highlights || "— 暂无亮点"}</div></div><div><div className="mb-2 flex items-center gap-2"><span className="h-1.5 w-1.5 rounded-full bg-violet-600" /><h3 className="text-sm font-semibold text-slate-900">五点描述</h3></div><ul className="space-y-3">{result.bullets.map((b, idx) => {const disp = getBulletDisplay(b);const v = validateBullets([b]).bulletResults[0];const hasError = v.violations.some(x=> x.type==="OVER_LENGTH"||x.type==="BANNED_PHRASE"||x.type==="PLACEHOLDER"||x.type==="GUARANTEE");return (<li key={idx} className={`flex flex-col gap-1 rounded-xl border p-3.5 text-sm leading-6 ${hasError ? "border-red-200 bg-red-50/50 text-slate-800" : disp.status==="warning" ? "border-amber-200 bg-amber-50/50 text-slate-700" : "border-slate-200 bg-slate-50/50 text-slate-700"}`}><div className="flex gap-3"><span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-white text-xs font-semibold text-violet-700 shadow-sm">{idx + 1}</span><span className="flex-1">{highlightKeywords(b)}</span></div><div className="ml-9 flex items-center gap-2 text-xs"><span className={`rounded px-1.5 py-0.5 text-[11px] font-medium ${disp.status==="ok" ? "bg-emerald-50 text-emerald-700" : disp.status==="over" ? "bg-red-50 text-red-700" : "bg-amber-50 text-amber-700"}`}>{disp.text}</span><span className={`${disp.status==="ok" ? "text-emerald-600" : disp.status==="over" ? "text-red-600" : "text-amber-600"}`}>{disp.message}</span>{v.violations.filter(x=>x.type!=="OVER_RECOMMENDED"&&x.type!=="MISSING_HEADER").slice(0,1).map((vv,i)=>(<span key={i} className="text-amber-600">⚠ {vv.message}</span>))}</div></li>);})}</ul></div>{(() => {const bv = validateBullets(result.bullets);return (<>{hallucinationAlerts.length > 0 && (<div className="rounded-xl border border-amber-200 bg-amber-50 p-4"><div className="flex items-start gap-2"><span className="mt-0.5 text-amber-600">⚠</span><div><p className="text-sm font-medium text-amber-800">Listing Health Alert: 发现疑似未验证参数 [{hallucinationAlerts.map((a) => a.value).join(", ")}]。AI 可能产生了幻觉，请人工核对是否需要保留。</p><p className="mt-1 text-xs text-amber-700">已基于 &lt;Product_Facts&gt; 进行比对，上述数值/版本未在原始事实中出现。{hallucinationAlerts.some(a=>a.type==="UNSUPPORTED_CLAIM") && " 含禁用声明需包装证明。"}</p></div></div></div>)}{bv.hasDuplicates && (<div className="rounded-xl border border-amber-200 bg-amber-50 p-3"><p className="text-xs font-medium text-amber-800">⚠ 五点存在重复内容，建议差异化</p></div>)}{bv.totalLength > 1000 && (<div className="rounded-xl border border-amber-200 bg-amber-50 p-3"><p className="text-xs font-medium text-amber-800">⚠ 五点总长 {bv.totalLength} &gt; 1000，建议压缩以适配移动端</p></div>)}</>);})()}</div>)}
+              {error ? (<div className="rounded-xl border border-red-200 bg-red-50 px-4 py-6 text-center"><p className="text-sm font-medium text-red-700">生成失败，请检查网络或 API 配置</p><p className="mt-2 text-xs text-red-500">{error}</p></div>) : !result ? (<div className="flex flex-col items-center justify-center rounded-xl border border-dashed border-slate-200 bg-slate-50 px-6 py-16 text-center"><div className="flex h-12 w-12 items-center justify-center rounded-full bg-white shadow-sm"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#94a3b8" strokeWidth="1.8"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z" /><path d="M14 2v6h6" /></svg></div><p className="mt-4 text-sm font-medium text-slate-700">暂无生成结果</p><p className="mt-1 max-w-[320px] text-sm leading-5 text-slate-500">请在左侧填写产品信息并选择目标平台，点击“生成”即可在此预览</p></div>) : (<div className="space-y-6">{variants && variants.length===3 && (<div className="flex gap-2 p-1 bg-slate-100 rounded-xl">{variants.map((v,i)=> <button key={i} onClick={()=>{setActiveVariant(i); setResult(prev=> prev ? {...prev, title: v.title, highlights: v.highlights} : prev);}} className={`flex-1 px-3 py-2 text-xs font-medium rounded-lg transition ${activeVariant===i?"bg-white shadow text-violet-700":"text-slate-600 hover:bg-white/50"}`}>{`变体${i+1}·${v.strategy}`}</button>)}</div>)}{coverage && (<div className="rounded-xl border border-blue-200 bg-blue-50 px-4 py-3 flex items-center justify-between"><div className="text-sm"><span className="font-medium text-blue-900">SEO 关键词覆盖率：</span><span className="text-blue-700">已埋入 {coverage.hit}/{coverage.total}</span>{coverage.missing.length>0 && <span className="text-amber-700"> 未命中：{coverage.missing.join(", ")}</span>}</div><span className={`text-xs px-2 py-1 rounded-full font-medium ${coverage.hit===coverage.total?"bg-emerald-100 text-emerald-800":"bg-amber-100 text-amber-800"}`}>{coverage.hit===coverage.total?"✅ 全覆盖":"⚠️ 待优化"}</span></div>)}<div><div className="mb-2 flex items-center gap-2"><span className="h-1.5 w-1.5 rounded-full bg-violet-600" /><h3 className="text-sm font-semibold text-slate-900">标题</h3>{(() => {const disp = getTitleDisplayForPlatform(result.title, platform);const v = validateTitleForPlatform(result.title, platform);const over = v.violations.find((x) => x.type === "OVER_LENGTH");const other = v.violations.filter((x) => x.type !== "OVER_LENGTH");const brand = productName.trim().split(/\s+/)[0] || "";const mobile = platform === "tiktok-shop" ? {warnings:[]} : validateTitleMobile(result.title, brand);return (<><span className={`rounded px-1.5 py-0.5 text-[11px] font-medium ${disp.status === "ok" ? "bg-emerald-50 text-emerald-700" : disp.status === "over" ? "bg-red-50 text-red-700" : "bg-amber-50 text-amber-700"}`}>{disp.text}</span><span className={`text-xs ${disp.status === "ok" ? "text-emerald-600" : disp.status === "over" ? "text-red-600" : "text-amber-600"}`}>{disp.message}</span>{over ? null : other.length ? <span className="text-xs text-amber-600">⚠ {other[0].message}</span> : null}{mobile.warnings.length ? <span className="text-xs text-amber-600">⚠ {mobile.warnings[0]}</span> : null}</>);})()}</div><div className={`rounded-xl border p-4 text-sm leading-6 ${getTitleDisplayForPlatform(result.title, platform).status === "over" ? "border-red-200 bg-red-50/50 text-slate-800" : "border-violet-100 bg-violet-50/50 text-slate-800"}`}>{highlightKeywords(result.title)}</div></div><div><div className="mb-2 flex items-center gap-2"><span className="h-1.5 w-1.5 rounded-full bg-amber-500" /><h3 className="text-sm font-semibold text-slate-900">商品亮点</h3>{(() => {const dispH = getHighlightsDisplay(result.highlights);const vH = validateHighlights(result.highlights);const overH = vH.violations.find((x) => x.type === "OVER_LENGTH");const otherH = vH.violations.filter((x) => x.type !== "OVER_LENGTH");return (<><span className={`rounded px-1.5 py-0.5 text-[11px] font-medium ${dispH.status === "ok" ? "bg-emerald-50 text-emerald-700" : dispH.status === "over" ? "bg-red-50 text-red-700" : "bg-amber-50 text-amber-700"}`}>{dispH.text}</span><span className={`text-xs ${dispH.status === "ok" ? "text-emerald-600" : dispH.status === "over" ? "text-red-600" : "text-amber-600"}`}>{dispH.message}</span>{overH ? null : otherH.length ? <span className="text-xs text-amber-600">⚠ {otherH[0].message}</span> : null}</>);})()}</div><div className={`rounded-xl border p-4 text-sm leading-6 ${getHighlightsDisplay(result.highlights).status === "over" ? "border-red-200 bg-red-50/50 text-slate-600" : result.highlights ? "border-amber-100 bg-amber-50/50 text-slate-800" : "border-dashed border-slate-200 bg-slate-50 text-slate-400"}`}>{result.highlights || "— 暂无亮点"}</div></div><div><div className="mb-2 flex items-center gap-2"><span className="h-1.5 w-1.5 rounded-full bg-violet-600" /><h3 className="text-sm font-semibold text-slate-900">五点描述</h3></div><ul className="space-y-3">{result.bullets.map((b, idx) => {const disp = getBulletDisplay(b);const v = validateBullets([b]).bulletResults[0];const hasError = v.violations.some(x=> x.type==="OVER_LENGTH"||x.type==="BANNED_PHRASE"||x.type==="PLACEHOLDER"||x.type==="GUARANTEE");return (<li key={idx} className={`flex flex-col gap-1 rounded-xl border p-3.5 text-sm leading-6 ${hasError ? "border-red-200 bg-red-50/50 text-slate-800" : disp.status==="warning" ? "border-amber-200 bg-amber-50/50 text-slate-700" : "border-slate-200 bg-slate-50/50 text-slate-700"}`}><div className="flex gap-3"><span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-white text-xs font-semibold text-violet-700 shadow-sm">{idx + 1}</span><span className="flex-1">{highlightKeywords(b)}</span></div><div className="ml-9 flex items-center gap-2 text-xs"><span className={`rounded px-1.5 py-0.5 text-[11px] font-medium ${disp.status==="ok" ? "bg-emerald-50 text-emerald-700" : disp.status==="over" ? "bg-red-50 text-red-700" : "bg-amber-50 text-amber-700"}`}>{disp.text}</span><span className={`${disp.status==="ok" ? "text-emerald-600" : disp.status==="over" ? "text-red-600" : "text-amber-600"}`}>{disp.message}</span>{v.violations.filter(x=>x.type!=="OVER_RECOMMENDED"&&x.type!=="MISSING_HEADER").slice(0,1).map((vv,i)=>(<span key={i} className="text-amber-600">⚠ {vv.message}</span>))}</div></li>);})}</ul></div>{(() => {const bv = validateBullets(result.bullets);return (<>{hallucinationAlerts.length > 0 && (<div className="rounded-xl border border-amber-200 bg-amber-50 p-4"><div className="flex items-start gap-2"><span className="mt-0.5 text-amber-600">⚠</span><div><p className="text-sm font-medium text-amber-800">Listing Health Alert: 发现疑似未验证参数 [{hallucinationAlerts.map((a) => a.value).join(", ")}]。AI 可能产生了幻觉，请人工核对是否需要保留。</p><p className="mt-1 text-xs text-amber-700">已基于 &lt;Product_Facts&gt; 进行比对，上述数值/版本未在原始事实中出现。{hallucinationAlerts.some(a=>a.type==="UNSUPPORTED_CLAIM") && " 含禁用声明需包装证明。"}</p></div></div></div>)}{bv.hasDuplicates && (<div className="rounded-xl border border-amber-200 bg-amber-50 p-3"><p className="text-xs font-medium text-amber-800">⚠ 五点存在重复内容，建议差异化</p></div>)}{bv.totalLength > 1000 && (<div className="rounded-xl border border-amber-200 bg-amber-50 p-3"><p className="text-xs font-medium text-amber-800">⚠ 五点总长 {bv.totalLength} &gt; 1000，建议压缩以适配移动端</p></div>)}</>);})()}</div>)}
             </div>
           </section>
         </div>
         <p className="mt-6 text-center text-xs text-slate-400">已接入硅基流动 · {MODEL_OPTIONS.find(m=>m.value===selectedModel)?.label || "Qwen2.5-72B"} · 75字符标题 + 125字符亮点 均可被搜索 · 密钥本地存储</p>
       </main>
+      {isDraftDrawerOpen && (
+        <div className="fixed inset-0 z-50 flex">
+          <div className="flex-1 bg-black/30" onClick={()=>setIsDraftDrawerOpen(false)} />
+          <div className="w-96 max-w-[85vw] bg-white shadow-xl flex flex-col">
+            <div className="flex items-center justify-between p-4 border-b border-slate-200">
+              <h3 className="font-semibold text-slate-900">历史草稿箱</h3>
+              <button onClick={()=>setIsDraftDrawerOpen(false)} className="text-slate-400 hover:text-slate-600">✕</button>
+            </div>
+            <div className="flex-1 overflow-auto p-4 space-y-3">
+              {drafts.length===0 ? <p className="text-sm text-slate-400 text-center py-8">暂无草稿，编辑后5秒自动保存</p> : drafts.map(d=> (
+                <div key={d.id} className="rounded-xl border border-slate-200 p-3 hover:border-violet-200 hover:bg-violet-50/50 transition">
+                  <div className="flex items-center justify-between mb-1">
+                    <span className="text-xs font-medium text-slate-700 truncate pr-2">{d.productName || "未命名产品"}</span>
+                    <span className="text-xs text-slate-400 whitespace-nowrap">{new Date(d.timestamp).toLocaleString()}</span>
+                  </div>
+                  <p className="text-xs text-slate-500 line-clamp-2">{d.sellingPoints.slice(0,60) || "无卖点"}</p>
+                  <p className="text-xs text-violet-600 mt-1">{d.platform} · {d.result ? "已生成" : "未生成"}</p>
+                  <div className="flex gap-2 mt-2">
+                    <button onClick={()=>restoreDraft(d)} className="flex-1 py-1.5 rounded-lg bg-violet-600 text-white text-xs font-medium hover:bg-violet-700">恢复</button>
+                    <button onClick={()=>deleteDraft(d.id)} className="px-3 py-1.5 rounded-lg border border-slate-200 text-xs text-slate-600 hover:bg-slate-50">删除</button>
+                  </div>
+                </div>
+              ))}
+            </div>
+            <div className="p-4 border-t border-slate-100">
+              <button onClick={()=>{localStorage.removeItem('listing_drafts'); setDrafts([]);}} className="w-full py-2 rounded-lg border border-rose-200 text-rose-600 text-xs hover:bg-rose-50">清空全部</button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
