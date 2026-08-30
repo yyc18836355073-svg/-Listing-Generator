@@ -55,6 +55,8 @@ export const BANNED_RULES: BannedWordRule[] = [
   { pattern: /\b(contains bamboo)\b/i, word: 'contains bamboo', category: 'restricted', reason: '纺织类目竹纤维需标注 Viscose/Rayon 否则违规' },
 ];
 
+const brandInfringementWords = ['apple', 'iphone', 'ipad', 'homekit', 'macbook', 'sony', 'bose', 'jbl', 'beats', 'anker', 'bluetooth', 'wi-fi', 'velcro', 'teflon'];
+
 /**
  * 校验文本中的所有违规词
  */
@@ -106,6 +108,14 @@ export function validateSingleBullet(text: string, index: number): BulletValidat
   const bannedViolations = checkBannedWords(trimmed);
   for (const violation of bannedViolations) {
     errors.push(`包含高危/违禁词【${violation.word}】：${violation.reason}`);
+  }
+
+  const lowerText = trimmed.toLowerCase();
+  for (const w of brandInfringementWords) {
+    const re = new RegExp(`\\b${w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'i');
+    if (re.test(lowerText)) {
+      errors.push(`包含高危侵权第三方品牌词【${w}】：极易触发算法扫号封店`);
+    }
   }
 
   const emojiRegex = /[\u{1F300}-\u{1F6FF}\u{1F900}-\u{1F9FF}\u{2600}-\u{26FF}\u{2700}-\u{27BF}]/u;

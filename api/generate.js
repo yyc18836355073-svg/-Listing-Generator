@@ -143,12 +143,10 @@ ${platformRule}
         bullets: (currentListing.bullets || []).map(b => sanitize(b).slice(0, 500)),
         searchTerms: sanitize(currentListing.searchTerms || "").slice(0, 249),
       };
-      const safeViolations = (violations || []).map(v => sanitize(v).slice(0, 200));
-      userPrompt = `【智能合规修复任务】：
-当前生成的 Listing 存在违规或不符合 ${platform} 平台规则的地方，请进行针对性重写与修复。
+      userPrompt = `【全局智能合规审计与修复任务】
+当前 Listing 已被前端系统拦截，部分已知违规项如下：
+${safeViolations.length > 0 ? safeViolations.map((v, i) => `${i + 1}. ${v}`).join('\n') : '未检测到明显格式错误，请进行深度语义与侵权审查'}
 
-【待修复问题列表】：
-${safeViolations.length > 0 ? safeViolations.map((v, i) => `${i + 1}. ${v}`).join('\n') : '请全面检查并优化字数与违规词汇'}
 
 【当前 Listing 内容】：
 【当前标题】：${safeCurrent.title}
@@ -157,10 +155,13 @@ ${safeViolations.length > 0 ? safeViolations.map((v, i) => `${i + 1}. ${v}`).joi
 ${safeCurrent.bullets.join('\n')}
 【当前搜索词】：${safeCurrent.searchTerms}
 
-【修复执行要求】：
-1. 将所有违规词替换为合规的中性描述。
-2. 严格遵循上方【当前目标平台专属规则】中的字数与条数限制，否则系统将崩溃！
-3. 严格按照标签格式输出修复后的完整内容。`;
+
+🟟【最高修复指令（AI 独立审查权）】：
+1. 突破前端限制：即使上方【已知违规项】未提及，你也必须主动扫描并清除文本中隐藏的任何第三方品牌（如 Apple, Sony）、医疗宣称及绝对化极限词！
+2. 彻底洗白：将所有违规词重写为安全中性的功能描述。
+3. 严格遵循上方【${platform} 专属规则】的字数截断与格式约束！
+4. 严格按照标签格式输出修复后的完整内容。
+5. 🟟最高铁律：必须 100% 使用【${platform}】对应的本土化外语输出，严禁在结果中出现任何中文字符！`;
     } else {
       userPrompt = `【目标平台】：${platform} 
 （🚨最高铁律：必须 100% 全部使用【${platform}】对应的本土化外语输出！严禁在结果中出现任何中文字符！）
