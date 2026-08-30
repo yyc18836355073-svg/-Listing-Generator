@@ -515,6 +515,59 @@ ${platformRule}
     setTimeout(() => setCopied(false), 1800);
   };
 
+  const handleExport = async () => {
+    if (!result) return;
+    const XLSX = await import("xlsx");
+    const isAmazon = platform.startsWith("amazon");
+    const sheetData: Record<string, string>[] = [];
+    const st = result.highlights || "";
+    if (isAmazon) {
+      const row: Record<string, string> = {
+        "Title": result.title,
+        "Bullet Point 1": result.bullets[0] || "",
+        "Bullet Point 2": result.bullets[1] || "",
+        "Bullet Point 3": result.bullets[2] || "",
+        "Bullet Point 4": result.bullets[3] || "",
+        "Bullet Point 5": result.bullets[4] || "",
+        "Search Terms": st || result.highlights || "",
+        "Platform": platform,
+      };
+      sheetData.push(row);
+    } else {
+      // TikTok Shop
+      const row: Record<string, string> = {
+        "Product Name": result.title,
+        "Description": result.bullets.join("\n"),
+        "Highlights": result.highlights || "",
+        "Hashtags": st || result.highlights || "",
+        "Platform": platform,
+      };
+      sheetData.push(row);
+    }
+    // Add variants as extra rows if present
+    if (variants && variants.length) {
+      variants.forEach((v,i)=>{
+        if (isAmazon) {
+          sheetData.push({
+            "Title": v.title,
+            "Bullet Point 1": result.bullets[0] || "",
+            "Bullet Point 2": result.bullets[1] || "",
+            "Bullet Point 3": result.bullets[2] || "",
+            "Bullet Point 4": result.bullets[3] || "",
+            "Bullet Point 5": result.bullets[4] || "",
+            "Search Terms": v.highlights,
+            "Platform": `${platform} - 变体${i+1} ${v.strategy}`,
+          });
+        }
+      });
+    }
+    const ws = XLSX.utils.json_to_sheet(sheetData);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, isAmazon ? "Amazon" : "TikTok");
+    const fileName = `${platform}_${Date.now()}.xlsx`;
+    XLSX.writeFile(wb, fileName);
+  };
+
   return (
     <div className="min-h-screen bg-[#f8fafc]">
       <header className="sticky top-0 z-20 border-b border-slate-200 bg-white/80 backdrop-blur">
@@ -588,7 +641,12 @@ ${platformRule}
             </div>
           </section>
         </div>
-        <p className="mt-6 text-center text-xs text-slate-400">已接入硅基流动 · {MODEL_OPTIONS.find(m=>m.value===selectedModel)?.label || "Qwen2.5-72B"} · 75字符标题 + 125字符亮点 均可被搜索 · 密钥本地存储</p>
+        <div className="mt-6 flex justify-center">
+          <button onClick={handleExport} disabled={!result} className="inline-flex items-center gap-2 rounded-xl bg-emerald-600 px-6 py-3 text-sm font-semibold text-white shadow-sm transition hover:bg-emerald-700 disabled:cursor-not-allowed disabled:bg-slate-300">
+            📊 一键导出为刊登模板 (.xlsx)
+          </button>
+        </div>
+        <p className="mt-3 text-center text-xs text-slate-400">已接入硅基流动 · {MODEL_OPTIONS.find(m=>m.value===selectedModel)?.label || "Qwen2.5-72B"} · 75字符标题 + 125字符亮点 均可被搜索 · 密钥本地存储</p>
       </main>
       {isDraftDrawerOpen && (
         <div className="fixed inset-0 z-50 flex">
