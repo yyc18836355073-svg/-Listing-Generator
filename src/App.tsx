@@ -594,14 +594,22 @@ ${platformRule}
             <div className="px-4 pb-4 space-y-3 border-t border-slate-100 pt-3">
               <div>
                 <label className="block text-xs font-medium text-slate-600 mb-1">SiliconFlow API Key</label>
-                <input
-                  type="password"
-                  value={apiKey}
-                  onChange={(e) => { setApiKey(e.target.value); localStorage.setItem('siliconflow_key', e.target.value); }}
-                  placeholder="填入硅基流动 sk-...（仅本地存储）"
-                  className="w-full bg-white rounded-lg border border-amber-200 px-3 py-2 text-sm text-slate-900 placeholder:text-slate-400 focus:border-violet-400 focus:outline-none focus:ring-2 focus:ring-violet-100"
-                />
-                <p className="mt-1 text-xs text-slate-400">仅本地存储，不上传服务器</p>
+                <div className="flex gap-2">
+                  <input
+                    type="password"
+                    value={apiKey}
+                    onChange={(e) => setApiKey(e.target.value)}
+                    placeholder="填入硅基流动 sk-...（仅本地存储）"
+                    className="flex-1 bg-white rounded-lg border border-amber-200 px-3 py-2 text-sm text-slate-900 placeholder:text-slate-400 focus:border-violet-400 focus:outline-none focus:ring-2 focus:ring-violet-100"
+                  />
+                  <button
+                    onClick={() => { localStorage.setItem('siliconflow_key', apiKey); setError(null); const el=document.createElement('div'); el.textContent='已保存'; el.className='fixed top-4 left-1/2 -translate-x-1/2 bg-emerald-600 text-white text-sm px-4 py-2 rounded-full shadow-lg z-50'; document.body.appendChild(el); setTimeout(()=>el.remove(),1500); }}
+                    className="px-4 py-2 rounded-lg bg-violet-600 text-white text-sm font-medium hover:bg-violet-700 whitespace-nowrap"
+                  >
+                    保存
+                  </button>
+                </div>
+                <p className="mt-1 text-xs text-slate-400">仅本地存储，不上传服务器 · 修改后点保存</p>
               </div>
               <div>
                 <label className="block text-xs font-medium text-slate-600 mb-1">模型选择</label>
