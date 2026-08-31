@@ -14,6 +14,15 @@ const PLATFORM_OPTIONS: { value: Platform; label: string; hint: string }[] = [
   { value: "tiktok-shop", label: "TikTok Shop", hint: "40-80 爆款钩子" },
 ];
 
+const langMap: Record<Platform, string> = {
+  "amazon-us": "英文（Amazon.com）",
+  "amazon-de": "德文（Amazon.de）",
+  "amazon-uk": "英文（Amazon.co.uk）",
+  "amazon-jp": "日文（Amazon.co.jp）",
+  "temu": "英文（Temu）",
+  "tiktok-shop": "英文（TikTok Shop）",
+};
+
 const PLATFORM_PROMPTS: Record<Platform, string> = {
   'amazon-us': `【Amazon 美国站规则】:
 - 标题: 严格控制在 75 字符内，首字母大写，包含大词与核心卖点。
@@ -237,7 +246,8 @@ ${platformRule}
 1. 严禁自行捏造任何用户未提及的具体尺寸、精确重量或虚构功能。
 2. 严禁提及任何第三方知名品牌及商标进行蹭流侵权。
 3. 严禁使用医疗疗效词（cure, treat, relief, FDA approved）及违规农药词。
-4. 必须严格按照以下标签输出，标签内直接输出纯文本内容：
+4. 输出语言必须为【${langMap[platform]}】，将中文事实翻译为地道目标语言，严禁直接复制中文。
+5. 必须严格按照以下标签输出，标签内直接输出纯文本内容：
 【商品标题 - 变体矩阵】请为标题和亮点各输出3套差异化变体，策略A-极简参数风、策略B-痛点解决风、策略C-感官营销风，以JSON格式输出：
 {"variants":[{"strategy":"极简参数风","title":"...","highlights":"..."},{"strategy":"痛点解决风","title":"...","highlights":"..."},{"strategy":"感官营销风","title":"...","highlights":"..."}]}
 【五点描述】(极端严格：必须且只能以数字序号 "1. "、"2. "、"3. "、"4. "、"5. " 开头进行分行，严禁使用短横线 - 或圆点 • ！)
@@ -453,7 +463,8 @@ ${platformRule}
 1. 严禁自行捏造任何用户未提及的具体尺寸、精确重量或虚构功能。
 2. 严禁提及任何第三方知名品牌及商标进行蹭流侵权。
 3. 严禁使用医疗疗效词（cure, treat, relief, FDA approved）及违规农药词。
-4. 必须严格按照以下标签输出，标签内直接输出纯文本内容：
+4. 输出语言必须为【${langMap[platform]}】，将中文事实翻译为地道目标语言，严禁直接复制中文。
+5. 必须严格按照以下标签输出，标签内直接输出纯文本内容：
 【商品标题】
 【商品亮点】
 【五点描述】(极端严格：必须且只能以数字序号 "1. "、"2. "、"3. "、"4. "、"5. " 开头进行分行，严禁使用短横线 - 或圆点 • ！)
