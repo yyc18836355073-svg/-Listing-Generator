@@ -38,7 +38,7 @@ async function runPipeline(initialTitle, mockFetch) {
             break;
           }
           lastTitle = compCleaned;
-        } catch (e) {
+        } catch {
           error = `Compression attempt ${attempt+1} failed`;
           break;
         }

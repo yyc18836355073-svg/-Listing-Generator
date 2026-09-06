@@ -1,9 +1,5 @@
 import { validateFacts } from "../src/lib/factValidator.ts";
 
-function assert(condition, msg) {
-  if (!condition) throw new Error(msg);
-}
-
 function run() {
   let pass = 0;
   let fail = 0;
@@ -15,7 +11,7 @@ function run() {
     const res = validateFacts(text, facts);
     const ok = res.some((r) => r.type === "UNSUPPORTED_VERSION" && r.value.toLowerCase().includes("bluetooth 5.0"));
     console.log(`Test 1 版本号捏造: ${ok ? "PASS" : "FAIL"}`, res);
-    ok ? pass++ : fail++;
+    if (ok) { pass++; } else { fail++; }
   }
 
   // Test 2: 数值捏造拦截
@@ -25,7 +21,7 @@ function run() {
     const res = validateFacts(text, facts);
     const ok = res.some((r) => r.type === "UNSUPPORTED_NUMBER" && r.value.toLowerCase().includes("24"));
     console.log(`Test 2 数值捏造: ${ok ? "PASS" : "FAIL"}`, res);
-    ok ? pass++ : fail++;
+    if (ok) { pass++; } else { fail++; }
   }
 
   // Test 3: 合法放行
@@ -35,7 +31,7 @@ function run() {
     const res = validateFacts(text, facts);
     const ok = res.length === 0;
     console.log(`Test 3 合法放行: ${ok ? "PASS" : "FAIL"}`, res);
-    ok ? pass++ : fail++;
+    if (ok) { pass++; } else { fail++; }
   }
 
   // Test 4: 白名单豁免
@@ -45,7 +41,7 @@ function run() {
     const res = validateFacts(text, facts);
     const ok = res.length === 0;
     console.log(`Test 4 白名单: ${ok ? "PASS" : "FAIL"}`, res);
-    ok ? pass++ : fail++;
+    if (ok) { pass++; } else { fail++; }
   }
 
   console.log(`\nResult: ${pass}/4 PASS, ${fail}/4 FAIL`);

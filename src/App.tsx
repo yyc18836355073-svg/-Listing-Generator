@@ -182,7 +182,7 @@ export default function App() {
     setCopied(false);
     setError(null);
     setResult(null);
-    const normalizedPoints = sellingPoints.trim().replace(/[\/／]/g, "、").replace(/[,，]/g, "、");
+    const normalizedPoints = sellingPoints.trim().replace(/[/／]/g, "、").replace(/[,，]/g, "、");
     const platformRule = PLATFORM_PROMPTS[platform] || PLATFORM_PROMPTS["WB"];
     const systemPrompt = `你是一名精通${platform}的资深运营。当前目标平台为：${platform}。\n【规则】：${platformRule}\n【铁律】：严禁捏造未提及参数；严禁品牌侵权；严禁医疗疗效词；必须输出俄文。\n标签：【商品标题】\n【搜索标签】\n【商品详情】`;
     const userPrompt = `商品名称：${productName.trim()}\n核心卖点：<Product_Facts>${normalizedPoints}</Product_Facts>`;

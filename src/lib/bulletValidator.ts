@@ -110,7 +110,7 @@ export function validateBullet(bullet: string): BulletValidationResult {
   }
 
   // 头部格式：应以大写词+冒号开头（允许数字/点，如 7.5W/5.2）
-  if (!/^[A-Z0-9][A-Z0-9\s\-\.]{2,30}:/.test(trimmed)) {
+  if (!/^[A-Z0-9][A-Z0-9\s.-]{2,30}:/.test(trimmed)) {
     violations.push({ type: "MISSING_HEADER", message: "建议以全大写头+冒号开头（如 'IP67 WATERPROOF:'）" });
   }
 
